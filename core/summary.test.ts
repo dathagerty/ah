@@ -163,13 +163,13 @@ const payload = {
   lastReply: "",
 }
 
-/** Runs `run` with PATH holding only an `ai` that runs `script`, or no `ai` */
+/** Runs `run` with PATH holding only a `claude` that runs `script`, or no `claude` */
 async function withAi<T>(script: string | null, run: () => Promise<T>): Promise<T> {
-  const dir = mkdtempSync(join(tmpdir(), "summary-ai-"))
+  const dir = mkdtempSync(join(tmpdir(), "summary-claude-"))
   dirs.push(dir)
   if (script !== null) {
-    writeFileSync(join(dir, "ai"), `#!/bin/sh\n${script}\n`)
-    chmodSync(join(dir, "ai"), 0o755)
+    writeFileSync(join(dir, "claude"), `#!/bin/sh\n${script}\n`)
+    chmodSync(join(dir, "claude"), 0o755)
   }
   const path = process.env.PATH
   process.env.PATH = dir
@@ -189,14 +189,14 @@ test("generateSummary returns the label", async () => {
 
 test("generateSummary says why there's no label", async () => {
   expect(await withAi(null, () => generateSummary(payload))).toEqual({
-    skipped: "ai not found",
+    skipped: "claude not found",
   })
   expect(
-    await withAi("/bin/cat > /dev/null; echo 'no key for luna' >&2; exit 3", () =>
+    await withAi("/bin/cat > /dev/null; echo 'no key for haiku' >&2; exit 3", () =>
       generateSummary(payload),
     ),
-  ).toEqual({ skipped: "ai exited 3: no key for luna" })
+  ).toEqual({ skipped: "claude exited 3: no key for haiku" })
   expect(await withAi("/bin/cat > /dev/null", () => generateSummary(payload))).toEqual({
-    skipped: "ai returned nothing",
+    skipped: "claude returned nothing",
   })
 })

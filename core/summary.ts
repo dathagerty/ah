@@ -10,14 +10,18 @@ import { readFile } from "node:fs/promises"
  * the payload as JSON on stdin and prints the label as plain text. Any CLI
  * that does that works, like
  * `["claude", "-p", "--model", "haiku", "--system-prompt", system]`. */
+// HACK: disableAllHooks keeps this claude out of ah's registry; without it,
+// its UserPromptSubmit asks for another summary, which runs another claude
 const summaryCommand = (system: string) => [
-  "ai",
-  "--system",
-  system,
+  "claude",
+  "-p",
   "--model",
-  "luna",
-  "--raw",
-  "--ephemeral",
+  "haiku",
+  "--system-prompt",
+  system,
+  "--no-session-persistence",
+  "--settings",
+  JSON.stringify({ disableAllHooks: true }),
 ]
 
 const MESSAGE_WINDOW = 5
