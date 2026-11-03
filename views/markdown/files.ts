@@ -4,7 +4,7 @@
 import { threadKinds } from "../../subjects/thread/kinds.ts"
 import type { FileType, Live } from "../../subjects/files/files.ts"
 import { LiveDoc } from "./doc.ts"
-import { helixCommand } from "./helix_command.ts"
+import { neovimCommand } from "./neovim_command.ts"
 import type { EditorBackend } from "./editor.ts"
 import { PtyBackend } from "./pty.ts"
 
@@ -36,6 +36,6 @@ export const markdownFiles: FileType<LiveMarkdown> = {
   attach: async (path, pages) =>
     new LiveMarkdown(
       await LiveDoc.open(path, (message) => pages.broadcast(message)),
-      new PtyBackend(path, helixCommand),
+      new PtyBackend(path, neovimCommand),
     ),
 }

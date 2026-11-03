@@ -126,7 +126,7 @@ view
       .choices(["window", "tab", "split", "float", "here"] as const)
       .default("window" as const),
   )
-  .option("--no-editor", "Markdown preview only, without the helix pane")
+  .option("--no-editor", "Markdown preview only, without the editor pane")
   .option("--no-chat", "Without the conversation")
   .option(
     "--diff-from [revset]",

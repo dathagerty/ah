@@ -16,7 +16,7 @@ import { setUpBasePicker } from "./base_picker.ts"
 import "./preview.ts"
 import { type SourcePosition, sourcePosition } from "./source_position.ts"
 import type { EditorPane } from "./editor.ts"
-import { helix } from "./helix.ts"
+import { neovim } from "./neovim.ts"
 import { TerminalPane } from "./terminal_pane.ts"
 
 const preview = document.querySelector("ah-markdown")!
@@ -57,10 +57,10 @@ preview.addEventListener("closed", () => {
 
 // ---------- editor pane ----------
 
-// What fills the pane (editor.ts): Helix in a terminal. The pane always
+// What fills the pane (editor.ts): Neovim in a terminal. The pane always
 // starts collapsed.
 const pane: EditorPane | null = editorHost
-  ? new TerminalPane(editorHost, wsUrl("editor"), helix, () => setEditorShown(false))
+  ? new TerminalPane(editorHost, wsUrl("editor"), neovim, () => setEditorShown(false))
   : null
 
 function setEditorShown(shown: boolean) {
