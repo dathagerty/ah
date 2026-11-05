@@ -100,6 +100,21 @@ async function focus(tab: string) {
   if (!res.ok) console.error("ah: focus failed:", res.status, await res.text())
 }
 
+// A file or change ID in the log (ansi.ts) opens in the doc editor, nvim,
+// or skepsis; the server picks which (links.ts). Not at the end of a drag
+// that selected the link's text.
+logPane.addEventListener("click", (e) => {
+  const a = (e.target as Element).closest<HTMLElement>("a[data-file], a[data-rev]")
+  if (!a || !state.focused || getSelection()?.toString()) return
+  const { file, rev } = a.dataset
+  void openLink({ tab: state.focused, ...(file ? { file } : { rev }) })
+})
+
+async function openLink(body: { tab: string; file?: string; rev?: string }) {
+  const res = await fetch("open", { method: "POST", body: JSON.stringify(body) })
+  if (!res.ok) console.error("ah: couldn't open the link:", res.status, await res.text())
+}
+
 // Cmd+1–8 for the nth tab and Cmd+9 for the last, as in a browser, and
 // Cmd+Opt+Left/Right for the previous and next, wrapping. Keys pressed in a
 // frame go to the frame's page, not here.

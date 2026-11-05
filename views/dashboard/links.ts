@@ -1,0 +1,62 @@
+// Where a click on a link in the dashboard's jj log opens. jj.ts writes the
+// links, ansi.ts turns them into anchors, and client.ts posts a click here
+// through routes.ts.
+
+import { realpath } from "node:fs/promises"
+import { isAbsolute, join, relative, sep } from "node:path"
+
+export type LinkTarget =
+  | { open: "doc"; path: string }
+  | { open: "nvim"; path: string }
+  | { open: "skepsis"; rev: string }
+
+export type LinkResult =
+  | { ok: true; target: LinkTarget }
+  | { ok: false; status: 400 | 404; error: string }
+
+/** What the doc editor shows */
+const DOC = /\.(md|markdown|html?)$/i
+
+/** jj's change IDs are k–z only. A rev goes to jj, so nothing else does:
+ * no revsets, no commit IDs. */
+const CHANGE_ID = /^[k-z]+$/
+
+const refuse = (status: 400 | 404, error: string): LinkResult => ({
+  ok: false,
+  status,
+  error,
+})
+
+const isNotFound = (e: unknown) => (e as NodeJS.ErrnoException).code === "ENOENT"
+
+/** `body` as the page posts it: `{ file }`, relative to the workspace root,
+ * or `{ rev }`. A file must be in the workspace once symlinks are followed. */
+export async function resolveLink(root: string, body: unknown): Promise<LinkResult> {
+  if (typeof body !== "object" || body === null) return refuse(400, "not a link")
+  const { file, rev } = body as { file?: unknown; rev?: unknown }
+  if ((file === undefined) === (rev === undefined))
+    return refuse(400, "a link has a file or a rev")
+  if (rev !== undefined) {
+    if (typeof rev !== "string" || !CHANGE_ID.test(rev))
+      return refuse(400, "not a change ID")
+    return { ok: true, target: { open: "skepsis", rev } }
+  }
+  if (typeof file !== "string" || file === "" || isAbsolute(file))
+    return refuse(400, "not a path in the workspace")
+  const realRoot = await realpath(root)
+  const inside = (p: string) => {
+    const rel = relative(realRoot, p)
+    return rel !== "" && rel !== ".." && !rel.startsWith(`..${sep}`)
+  }
+  // By the path's text first, so a refused path doesn't say whether it exists
+  if (!inside(join(realRoot, file))) return refuse(400, "not a path in the workspace")
+  let path: string
+  try {
+    path = await realpath(join(realRoot, file))
+  } catch (e) {
+    if (isNotFound(e)) return refuse(404, "no such file")
+    throw e
+  }
+  if (!path.startsWith(realRoot + sep)) return refuse(400, "not a path in the workspace")
+  return { ok: true, target: { open: DOC.test(path) ? "doc" : "nvim", path } }
+}

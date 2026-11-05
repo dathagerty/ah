@@ -222,6 +222,15 @@
         font: inherit;
         line-height: 1.35;
       }
+      /* Files and change IDs that open on a click (client.ts) */
+      pre.log a[data-file],
+      pre.log a[data-rev] {
+        cursor: pointer;
+      }
+      pre.log a[data-file]:hover,
+      pre.log a[data-rev]:hover {
+        text-decoration: underline;
+      }
       .empty {
         color: var(--muted);
         padding: 20px;

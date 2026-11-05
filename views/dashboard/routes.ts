@@ -22,6 +22,7 @@ import {
 import { Presence } from "../../platform/presence.ts"
 import { selectTab } from "../../platform/rex.ts"
 import { LogWatcher, SnapshotWatcher } from "./jj.ts"
+import { resolveLink } from "./links.ts"
 import { rootFinder } from "../../core/workspace.ts"
 import { focusedRoot, resolve, type State } from "./workspace.ts"
 
@@ -237,7 +238,19 @@ export class Dashboard {
     if (rest === "events") return this.#events()
     if (rest === "focus" && req.method === "POST") return await this.#focus(req)
     if (rest === "tracker" && req.method === "POST") return await this.#pickTracker(req)
+    if (rest === "open" && req.method === "POST") return await this.#openLink(req)
     return new Response("not found", { status: 404 })
+  }
+
+  /** Open a file or change from a link in a tab's jj log, for a click on it */
+  async #openLink(req: Request): Promise<Response> {
+    const { tab: id, ...link }: { tab?: unknown } = await req.json()
+    const tab = this.#state.tabs.find((t) => t.id === id)
+    if (!tab) return new Response("no such tab", { status: 404 })
+    const result = await resolveLink(tab.root, link)
+    if (!result.ok) return new Response(result.error, { status: result.status })
+    // Opening each target comes next
+    return new Response(`can't open in ${result.target.open} yet`, { status: 501 })
   }
 
   /** Show a tab in Rex, for a click on its chip, leaving focus on the dashboard */
