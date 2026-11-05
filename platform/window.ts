@@ -79,6 +79,11 @@ function windowsShowing(url: string): number[] {
   return processTable().flatMap((p) => (p.args.match(SHOWING)?.[1] === url ? [p.pid] : []))
 }
 
+/** Close the windows showing `url` */
+export function closeWindows(url: string) {
+  for (const pid of windowsShowing(url)) process.kill(pid)
+}
+
 /** Bring the newest window showing `url` to the front. Returns whether there
  * was one. */
 export async function focusWindow(url: string): Promise<boolean> {
@@ -103,7 +108,7 @@ export async function openWindow(
     if (focus.take) await focusWindow(url)
     return
   }
-  for (const pid of windowsShowing(url)) process.kill(pid)
+  closeWindows(url)
   const app = await namedApp(await builtApp(), options.name)
   // An app's own activate() is ignored after a -g launch (since macOS 14,
   // activation is the app in front's to give), so launching is what brings it

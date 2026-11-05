@@ -32,6 +32,40 @@ export function nvimFloat(path: string, root: string) {
   return { label: basename(path), command: ["nvim", path], cwd: root }
 }
 
+/** One word to a POSIX shell, whatever's in it */
+export const shellQuote = (s: string) => `'${s.replaceAll("'", `'\\''`)}'`
+
+/** skepsis on what the change's stack adds since main, from the same base
+ * as the log's file list (jj.ts). Its Send and its page go through ah from
+ * the tab's pane, so comments reach that tab's agent. */
+export function skepsisLaunch(
+  rev: string,
+  root: string,
+  pane: Pane,
+  port: number,
+  ah: string[],
+  skepsis: string,
+): Launch {
+  const [node] = ah
+  const ahCmd = `${ah.map(shellQuote).join(" ")}`
+  return {
+    cmd: node,
+    args: [
+      skepsis,
+      "--from",
+      `fork_point(coalesce(present(main), trunk()) | ${rev})`,
+      "--to",
+      rev,
+      "--send",
+      `jq -r .prompt | ${ahCmd} message send --port ${port}`,
+      "--open-cmd",
+      `${ahCmd} view open --port ${port} --name skepsis`,
+    ],
+    cwd: root,
+    env: { REX_SESSION: pane.session, REX_BLOCK: pane.block },
+  }
+}
+
 /** `ah view open` on the file. `ah` is how to run ah: node, its flags, and
  * the script. */
 export function docLaunch(

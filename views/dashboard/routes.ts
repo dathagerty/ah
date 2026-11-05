@@ -7,7 +7,10 @@
 // element, or in a frame for an html file. The focused workspace gets
 // snapshotted once edits settle, so @ stays current between jj commands.
 
+import { type ChildProcess, spawn } from "node:child_process"
 import { readFile } from "node:fs/promises"
+import { homedir } from "node:os"
+import { join } from "node:path"
 import { assetPath } from "../../platform/assets.ts"
 import { ClientBundles } from "../../platform/bundle.ts"
 import type { HtmlBackend } from "../html/routes.ts"
@@ -21,15 +24,29 @@ import {
 } from "../../core/model.ts"
 import { Presence } from "../../platform/presence.ts"
 import { openFloat, selectTab } from "../../platform/rex.ts"
+import { closeWindows } from "../../platform/window.ts"
 import { LogWatcher, SnapshotWatcher } from "./jj.ts"
 import { resolveLink } from "./links.ts"
-import { docLaunch, type Launch, nvimFloat, type Pane, paneIn } from "./openers.ts"
+import {
+  docLaunch,
+  type Launch,
+  nvimFloat,
+  type Pane,
+  paneIn,
+  skepsisLaunch,
+} from "./openers.ts"
 import { run } from "../../platform/proc.ts"
 import { rootFinder } from "../../core/workspace.ts"
 import { type DashTab, focusedRoot, resolve, type State } from "./workspace.ts"
 
 /** How to run ah itself, as the server was run */
 const AH = [process.execPath, ...process.execArgv, process.argv[1]]
+
+/** Where the skepsis skill runs it from (skills/skepsis/SKILL.md) */
+const SKEPSIS = join(homedir(), "code/utilities/skepsis/cli.ts")
+
+/** How long skepsis gets to start listening before a click gives up */
+const SKEPSIS_START_MS = 15_000
 
 // Changes on every server start. The page reloads when it reconnects to a
 // different server, so restarting the server is enough to pick up page edits.
@@ -108,6 +125,9 @@ export class Dashboard {
   #docQueue: Promise<void> = Promise.resolve()
   /** What's wrong with the server's view of Rex, as last sent */
   #healthJson = JSON.stringify({ rex: null })
+  /** tab -> the skepsis a click on a change ID started there, and its page's
+   * URL once it's listening */
+  #skepsis = new Map<string, { child: ChildProcess; url: string | null }>()
 
   readonly options: DashboardOptions
 
@@ -267,8 +287,53 @@ export class Dashboard {
         docLaunch(target.path, tab.root, pane, this.options.port, AH),
       )
     if (target.open === "nvim") return await this.#openNvim(target.path, tab, pane)
-    // skepsis comes next
-    return new Response(`can't open in ${target.open} yet`, { status: 501 })
+    return await this.#openSkepsis(target.rev, tab, pane)
+  }
+
+  /** skepsis on the change, replacing the tab's last one and its window. It
+   * prints one line once it's listening, by when it has opened its page. */
+  async #openSkepsis(rev: string, tab: DashTab, pane: Pane): Promise<Response> {
+    const last = this.#skepsis.get(tab.id)
+    last?.child.kill()
+    if (last?.url) closeWindows(last.url)
+    const { cmd, args, cwd, env } = skepsisLaunch(
+      rev,
+      tab.root,
+      pane,
+      this.options.port,
+      AH,
+      SKEPSIS,
+    )
+    const child = spawn(cmd, args, {
+      cwd,
+      env: { ...process.env, ...env },
+      stdio: ["ignore", "pipe", "pipe"],
+    })
+    const entry: { child: ChildProcess; url: string | null } = { child, url: null }
+    this.#skepsis.set(tab.id, entry)
+    child.on("exit", () => {
+      if (this.#skepsis.get(tab.id) === entry) this.#skepsis.delete(tab.id)
+    })
+    child.stderr.on("data", (d) => process.stderr.write(`skepsis: ${d}`))
+    const started = await new Promise<string | null>((resolve) => {
+      let out = ""
+      child.stdout.on("data", (d) => {
+        out += d
+        const line = /^skepsis on (\S+).*$/m.exec(out)
+        if (!line) return
+        entry.url = line[1]
+        resolve(line[0])
+      })
+      child.on("exit", () => resolve(null))
+      child.on("error", () => resolve(null))
+      setTimeout(() => resolve(null), SKEPSIS_START_MS).unref()
+    })
+    if (!started) {
+      child.kill()
+      return new Response("skepsis didn't start", { status: 502 })
+    }
+    console.error(`ah: ${started}`)
+    return new Response(null, { status: 204 })
   }
 
   /** nvim in a float over the tab, which Rex then shows: the click was to
