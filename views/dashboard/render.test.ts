@@ -50,6 +50,53 @@ test("ansiToHtml escapes HTML and drops non-SGR sequences", () => {
   assertEquals(ansiToHtml(`<b>&${ESC}[2K${ESC}]8;;http://x${ESC}\\`), "&lt;b&gt;&amp;")
 })
 
+/** An OSC 8 hyperlink, as jj's hyperlink() writes it */
+const link = (url: string, text: string) =>
+  `${ESC}]8;;${url}${ESC}\\${text}${ESC}]8;;${ESC}\\`
+
+test("ansiToHtml turns ah: file and rev links into anchors", () => {
+  assertEquals(
+    ansiToHtml(`M ${link("ah:file/views/cli.ts", "views/cli.ts")}`),
+    'M <a data-file="views/cli.ts">views/cli.ts</a>',
+  )
+  assertEquals(
+    ansiToHtml(link("ah:rev/klxkmyyo", "klxk")),
+    '<a data-rev="klxkmyyo">klxk</a>',
+  )
+})
+
+test("ansiToHtml keeps style spans inside a link's anchor", () => {
+  // the shape of a linked change ID in jj's log
+  assertEquals(
+    ansiToHtml(`${ESC}[1m${link("ah:rev/x", `${ESC}[38;5;13mk`)} y${ESC}[0m`),
+    '<a data-rev="x"><span style="color:var(--ansi-13);font-weight:bold">k</span></a>' +
+      '<span style="color:var(--ansi-13);font-weight:bold"> y</span>',
+  )
+})
+
+test("ansiToHtml leaves other links as plain text", () => {
+  assertEquals(ansiToHtml(link("https://example.com", "t")), "t")
+  assertEquals(ansiToHtml(link("ah:other/x", "t")), "t")
+})
+
+test("ansiToHtml escapes a link's path in its attribute", () => {
+  assertEquals(
+    ansiToHtml(link('ah:file/a"b&<c>.txt', "f")),
+    '<a data-file="a&quot;b&amp;&lt;c&gt;.txt">f</a>',
+  )
+})
+
+test("ansiToHtml reads a link ended by BEL as well as ST", () => {
+  assertEquals(
+    ansiToHtml(`${ESC}]8;;ah:file/a\x07a${ESC}]8;;\x07`),
+    '<a data-file="a">a</a>',
+  )
+})
+
+test("ansiToHtml closes a link left open at the end", () => {
+  assertEquals(ansiToHtml(`${ESC}]8;;ah:file/a${ESC}\\a`), '<a data-file="a">a</a>')
+})
+
 test("opHeadsDir follows a secondary workspace's repo pointer", async () => {
   const dir = mkdtempSync(join(tmpdir(), "ah-dashboard-"))
   try {

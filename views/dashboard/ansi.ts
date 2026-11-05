@@ -26,6 +26,15 @@ const plain = (): Style => ({
 const escapeHtml = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 
+const escapeAttr = (s: string) => escapeHtml(s).replace(/"/g, "&quot;")
+
+/** The anchor attribute for an ah link from the log's templates (jj.ts),
+ * null for any other URL, whose text stays plain */
+function linkAttr(url: string): string | null {
+  const m = /^ah:(file|rev)\/(.+)$/.exec(url)
+  return m ? `data-${m[1]}="${escapeAttr(m[2])}"` : null
+}
+
 function css(style: Style): string {
   const out = []
   if (style.fg) out.push(`color:${style.fg}`)
@@ -88,10 +97,24 @@ export function ansiToHtml(text: string): string {
   let style = plain()
   // style of the span currently open in `out`, "" when none is
   let openAttr = ""
+  // whether an <a> is open in `out`
+  let inLink = false
   // CSI sequences (SGR ends in m), plus OSC sequences ended by BEL or ST
   // oxlint-disable-next-line no-control-regex
-  const re = /\x1b\[([0-9;]*)([A-Za-z])|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g
+  const re = /\x1b\[([0-9;]*)([A-Za-z])|\x1b\]([^\x07\x1b]*)(?:\x07|\x1b\\)/g
   let last = 0
+  // An anchor can't cross a span, so the open span ends first and the text
+  // after reopens one
+  const closeSpan = () => {
+    if (openAttr) out += "</span>"
+    openAttr = ""
+  }
+  const closeLink = () => {
+    if (!inLink) return
+    closeSpan()
+    out += "</a>"
+    inLink = false
+  }
   // Spans open lazily, when there's text to put in them, so back-to-back
   // escapes don't leave empty spans and same-style runs share one
   const flush = (end: number) => {
@@ -107,11 +130,24 @@ export function ansiToHtml(text: string): string {
   for (const m of text.matchAll(re)) {
     flush(m.index)
     last = m.index + m[0].length
+    // OSC 8 is `8;params;url`; an empty url ends the link
+    const osc8 = m[3]?.match(/^8;[^;]*;(.*)$/)
+    if (osc8) {
+      closeLink()
+      const attr = osc8[1] ? linkAttr(osc8[1]) : null
+      if (attr) {
+        closeSpan()
+        out += `<a ${attr}>`
+        inLink = true
+      }
+      continue
+    }
     if (m[2] !== "m") continue
     const codes = m[1] === "" ? [0] : m[1].split(";").map((n) => Number(n || 0))
     style = apply(style, codes)
   }
   flush(text.length)
-  if (openAttr) out += "</span>"
+  closeLink()
+  closeSpan()
   return out
 }
