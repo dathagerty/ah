@@ -7,7 +7,8 @@ import { isAbsolute, join, relative, sep } from "node:path"
 
 export type LinkTarget =
   | { open: "doc"; path: string }
-  | { open: "nvim"; path: string }
+  /** In the dashboard's split under the log, or a Rex float for an ⌥-click */
+  | { open: "nvim"; path: string; float: boolean }
   | { open: "skepsis"; rev: string }
 
 export type LinkResult =
@@ -30,10 +31,16 @@ const refuse = (status: 400 | 404, error: string): LinkResult => ({
 const isNotFound = (e: unknown) => (e as NodeJS.ErrnoException).code === "ENOENT"
 
 /** `body` as the page posts it: `{ file }`, relative to the workspace root,
- * or `{ rev }`. A file must be in the workspace once symlinks are followed. */
+ * with `float` for an ⌥-click, or `{ rev }`. A file must be in the workspace
+ * once symlinks are followed. */
 export async function resolveLink(root: string, body: unknown): Promise<LinkResult> {
   if (typeof body !== "object" || body === null) return refuse(400, "not a link")
-  const { file, rev } = body as { file?: unknown; rev?: unknown }
+  const {
+    file,
+    rev,
+    float = false,
+  } = body as { file?: unknown; rev?: unknown; float?: unknown }
+  if (typeof float !== "boolean") return refuse(400, "float is true or false")
   if ((file === undefined) === (rev === undefined))
     return refuse(400, "a link has a file or a rev")
   if (rev !== undefined) {
@@ -58,5 +65,8 @@ export async function resolveLink(root: string, body: unknown): Promise<LinkResu
     throw e
   }
   if (!path.startsWith(realRoot + sep)) return refuse(400, "not a path in the workspace")
-  return { ok: true, target: { open: DOC.test(path) ? "doc" : "nvim", path } }
+  return {
+    ok: true,
+    target: DOC.test(path) ? { open: "doc", path } : { open: "nvim", path, float },
+  }
 }

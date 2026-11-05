@@ -9,6 +9,8 @@
 // pages port.
 
 import type { State } from "./workspace.ts"
+import { neovim } from "../markdown/neovim.ts"
+import { TerminalPane } from "../markdown/terminal_pane.ts"
 
 const byId = (id: string) => document.getElementById(id)!
 const strip = byId("strip")
@@ -18,6 +20,8 @@ const docName = byId("doc-name")
 const trackerStrip = byId("trackers")
 const parkedMenu = byId("parked")
 const status = byId("status")
+const nvimPane = byId("nvim-pane")
+const nvimName = byId("nvim-name")
 
 let version: string | null = null
 let state: State = { focused: null, tabs: [] }
@@ -72,6 +76,7 @@ function render() {
 
   const w = tabs.find((t) => t.id === focused)
   renderDoc(w?.id ?? null)
+  renderSplit()
   if (!w) {
     logPane.replaceChildren(
       el("p", { className: "empty" }, "No jj workspace in the focused tab."),
@@ -101,18 +106,83 @@ async function focus(tab: string) {
 }
 
 // A file or change ID in the log (ansi.ts) opens in the doc editor, nvim,
-// or skepsis; the server picks which (links.ts). Not at the end of a drag
-// that selected the link's text.
+// or skepsis; the server picks which (links.ts). nvim opens in the split
+// under the log, or with ⌥ in a Rex float. Not at the end of a drag that
+// selected the link's text.
 logPane.addEventListener("click", (e) => {
   const a = (e.target as Element).closest<HTMLElement>("a[data-file], a[data-rev]")
   if (!a || !state.focused || getSelection()?.toString()) return
   const { file, rev } = a.dataset
-  void openLink({ tab: state.focused, ...(file ? { file } : { rev }) })
+  const tab = state.focused
+  void openLink({ tab, ...(file ? { file, float: e.altKey } : { rev }) })
 })
 
-async function openLink(body: { tab: string; file?: string; rev?: string }) {
+async function openLink(body: {
+  tab: string
+  file?: string
+  rev?: string
+  float?: boolean
+}) {
   const res = await fetch("open", { method: "POST", body: JSON.stringify(body) })
-  if (!res.ok) console.error("ah: couldn't open the link:", res.status, await res.text())
+  if (!res.ok)
+    return console.error("ah: couldn't open the link:", res.status, await res.text())
+  // The split's socket; every other opener answers with no content
+  if (res.status !== 200 || !body.file) return
+  const { editor, doc }: { editor: string; doc: string } = await res.json()
+  openSplit(body.tab, body.file, editor, doc)
+}
+
+// tab -> nvim on a file in the split under the log, on the doc editor's pane
+// socket (routes.ts), hidden unless its tab is focused. The file's doc socket
+// is open alongside only so the server keeps the file, and nvim with it. A
+// new file replaces the tab's; :q or ✕ closes it.
+// pane is null only while it's being made
+const splits = new Map<
+  string,
+  { path: string; host: HTMLElement; doc: WebSocket; pane: TerminalPane | null }
+>()
+
+function openSplit(tab: string, path: string, editor: string, docUrl: string) {
+  closeSplit(tab)
+  const host = el("div", { className: "nvim-host" })
+  nvimPane.append(host)
+  const doc = new WebSocket(wsUrl(docUrl))
+  const split = { path, host, doc, pane: null as TerminalPane | null }
+  // Shown first, so the terminal fits the pane it opens in
+  splits.set(tab, split)
+  renderSplit()
+  split.pane = new TerminalPane(host, wsUrl(editor), neovim, () => {
+    if (splits.get(tab) === split) closeSplit(tab)
+  })
+  split.pane.show()
+}
+
+function closeSplit(tab: string) {
+  const split = splits.get(tab)
+  if (!split) return
+  splits.delete(tab)
+  split.pane?.close()
+  split.doc.close()
+  split.host.remove()
+  renderSplit()
+}
+
+function renderSplit() {
+  const split = state.focused ? splits.get(state.focused) : undefined
+  document.body.classList.toggle("has-nvim", !!split)
+  for (const s of splits.values()) s.host.hidden = s !== split
+  nvimName.textContent = split?.path ?? ""
+}
+
+byId("nvim-close").addEventListener("click", () => {
+  if (state.focused) closeSplit(state.focused)
+})
+
+/** A WebSocket URL for one of the server's paths */
+function wsUrl(path: string): string {
+  const url = new URL(path, location.href)
+  url.protocol = "ws:"
+  return url.href
 }
 
 // Cmd+1–8 for the nth tab and Cmd+9 for the last, as in a browser, and

@@ -44,10 +44,24 @@ test("markdown and html files open in the doc editor, whatever the extension's c
     })
 })
 
-test("any other file opens in nvim", async () => {
+test("any other file opens in nvim, in the dashboard's split", async () => {
   expect(await resolveLink(root, { file: "src/x.ts" })).toEqual({
     ok: true,
-    target: { open: "nvim", path: join(root, "src", "x.ts") },
+    target: { open: "nvim", path: join(root, "src", "x.ts"), float: false },
+  })
+})
+
+test("an ⌥-click opens nvim in a Rex float instead", async () => {
+  expect(await resolveLink(root, { file: "src/x.ts", float: true })).toEqual({
+    ok: true,
+    target: { open: "nvim", path: join(root, "src", "x.ts"), float: true },
+  })
+})
+
+test("float has to be a boolean", async () => {
+  expect(await resolveLink(root, { file: "src/x.ts", float: "yes" })).toMatchObject({
+    ok: false,
+    status: 400,
   })
 })
 

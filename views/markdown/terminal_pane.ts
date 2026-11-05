@@ -25,7 +25,10 @@ export class TerminalPane implements EditorPane {
   /** For a quit editor (`:q`), which the pane restarts behind it */
   readonly #onQuit: () => void
   #term: Terminal | null = null
+  #ws: WebSocket | null = null
   #resizes: ResizeObserver | null = null
+  /** Closed for good (close), so nothing restarts it */
+  #closed = false
   /** Types keys into the editor, set once it has drawn: before that it may not
    * have the pty in raw mode yet. What needs it sooner waits in #waiters. */
   #type: ((keys: string) => void) | null = null
@@ -48,6 +51,16 @@ export class TerminalPane implements EditorPane {
 
   show() {
     this.#term?.focus()
+  }
+
+  /** Hang up the editor and take the terminal down, for a page that removes
+   * the pane rather than hiding it (the dashboard's split) */
+  close() {
+    this.#closed = true
+    this.#ws?.close()
+    this.#resizes?.disconnect()
+    this.#term?.dispose()
+    this.#term = null
   }
 
   /** The editor's goto, and then its lower to bring the cursor's line level
@@ -121,6 +134,7 @@ export class TerminalPane implements EditorPane {
       })}`,
     )
     ws.binaryType = "arraybuffer"
+    this.#ws = ws
     const startedAt = performance.now()
     const send = (msg: Record<string, unknown>) => {
       if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg))
@@ -157,6 +171,7 @@ export class TerminalPane implements EditorPane {
       }
     }
     ws.onclose = (e) => {
+      if (this.#closed) return
       if (this.#type === type) this.#type = null
       // The editor quit, rather than failing to start or losing the server or
       // the file. One that quits soon after starting may be failing, and
@@ -217,6 +232,8 @@ export class TerminalPane implements EditorPane {
   }
 
   #restart() {
+    // onQuit may have closed it
+    if (this.#closed) return
     this.#resizes?.disconnect()
     this.#term?.dispose()
     this.#term = null

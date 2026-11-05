@@ -286,7 +286,9 @@ export class Dashboard {
       return await this.#launch(
         docLaunch(target.path, tab.root, pane, this.options.port, AH),
       )
-    if (target.open === "nvim") return await this.#openNvim(target.path, tab, pane)
+    if (target.open === "nvim" && target.float)
+      return await this.#openNvim(target.path, tab, pane)
+    if (target.open === "nvim") return await this.#nvimSplit(target.path)
     return await this.#openSkepsis(target.rev, tab, pane)
   }
 
@@ -334,6 +336,20 @@ export class Dashboard {
     }
     console.error(`ah: ${started}`)
     return new Response(null, { status: 204 })
+  }
+
+  /** Where the page's split under the log connects for nvim on the file:
+   * the doc editor's pane socket, which runs it with ah's setup (saving soon
+   * after typing stops, merging the agent's edits; neovim_command.ts) */
+  async #nvimSplit(path: string): Promise<Response> {
+    const info = await this.options.markdown.show(path)
+    if (!info) return new Response("no such file", { status: 404 })
+    // The editor socket alone doesn't hold the file open; a page's doc
+    // socket does, so the split opens one too
+    return Response.json({
+      editor: `${info.url}editor`,
+      doc: `${info.url}doc?in=dashboard`,
+    })
   }
 
   /** nvim in a float over the tab, which Rex then shows: the click was to
