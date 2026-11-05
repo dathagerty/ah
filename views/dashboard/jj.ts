@@ -4,7 +4,7 @@
 import { realpathSync, watch, type FSWatcher } from "node:fs"
 import { readFile, stat } from "node:fs/promises"
 import { join, resolve, sep } from "node:path"
-import { run } from "../../platform/proc.ts"
+import { run, type Output } from "../../platform/proc.ts"
 import { ansiToHtml } from "./ansi.ts"
 
 /**
@@ -22,23 +22,50 @@ export async function opHeadsDir(root: string): Promise<string> {
 // The log's default revset can reach far back in a busy repo
 const LOG_LIMIT = "50"
 
+/** A repo with no local main and no remote falls back to the root commit,
+ * which lists every file in it */
+export const MAX_FILES = 50
+
+const FILES_LABEL = "Changes since main:\n"
+
+// From the fork point, not main itself: a main that moved on along a
+// sibling branch would otherwise show its own commits as reversed changes
+const FILES_BASE = "fork_point(coalesce(present(main), trunk()) | @)"
+
+// One line per file, each a link the page opens (a removed file has nothing
+// to open). A rename shows both paths and links the new one.
+const FILES_TEMPLATE = `label("diff " ++ status, status_char) ++ " "
+  ++ if(status == "removed", display_diff_path, hyperlink("ah:file/" ++ path, display_diff_path))
+  ++ "\\n"`
+
+/**
+ * The file list over the log, each from its own jj command. A failed diff
+ * drops the list; a failed log shows jj's own message in its place.
+ */
+export function composeLog(files: Output, log: Output): string {
+  const logText = log.success ? log.stdout : log.stderr
+  const lines = files.success ? files.stdout.split("\n").filter(Boolean) : []
+  if (lines.length === 0) return logText
+  const shown = lines.slice(0, MAX_FILES).map((l) => `${l}\n`)
+  const rest = lines.length - shown.length
+  if (rest > 0) shown.push(`… ${rest} more files\n`)
+  return `${FILES_LABEL}${shown.join("")}\n${logText}`
+}
+
+export async function logText(root: string): Promise<string> {
+  const jj = (args: string[]) =>
+    run("jj", ["--ignore-working-copy", "--color", "always", ...args], { cwd: root })
+  const [files, log] = await Promise.all([
+    jj(["diff", "--from", FILES_BASE, "--to", "@", "--template", FILES_TEMPLATE]),
+    // links on change IDs come from the user's own `home` template, which
+    // checks ah.links
+    jj(["--config", "ah.links=true", "log", "--limit", LOG_LIMIT, "--template", "home"]),
+  ])
+  return composeLog(files, log)
+}
+
 async function renderLog(root: string): Promise<string> {
-  const { success, stdout, stderr } = await run(
-    "jj",
-    [
-      "--ignore-working-copy",
-      "--color",
-      "always",
-      "log",
-      "--limit",
-      LOG_LIMIT,
-      "--template",
-      "home",
-    ],
-    { cwd: root },
-  )
-  // a failure (e.g. a stale workspace) shows jj's own message in the pane
-  return ansiToHtml(success ? stdout : stderr)
+  return ansiToHtml(await logText(root))
 }
 
 /**
