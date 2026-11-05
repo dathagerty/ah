@@ -26,6 +26,12 @@ const nvimPane = byId("nvim-pane")
 const nvimName = byId("nvim-name")
 const testsPane = byId("tests-pane")
 const testsBadgeEl = byId("tests-badge")
+const newTracker = byId("new-tracker") as HTMLButtonElement
+const newTrackerForm = byId("new-tracker-form")
+const newTrackerFor = byId("new-tracker-for")
+const goalBox = byId("new-tracker-goal") as HTMLTextAreaElement
+const goalNote = byId("new-tracker-note")
+const goalSend = byId("new-tracker-send") as HTMLButtonElement
 
 let version: string | null = null
 let state: State = { focused: null, tabs: [] }
@@ -79,6 +85,10 @@ function render() {
   )
 
   const w = tabs.find((t) => t.id === focused)
+  newTracker.disabled = !w
+  newTracker.title = w
+    ? `Start a tracker in ${w.name}: its agent makes it`
+    : "No jj workspace in the focused tab"
   renderDoc(w?.id ?? null)
   renderSplit()
   renderLogTabs()
@@ -108,6 +118,55 @@ function render() {
 async function focus(tab: string) {
   const res = await fetch("focus", { method: "POST", body: JSON.stringify({ tab }) })
   if (!res.ok) console.error("ah: focus failed:", res.status, await res.text())
+}
+
+// The new-tracker button: a goal for the focused tab's agent, which makes the
+// tracker with the tracker skill (new_tracker.ts). The popover opens in the
+// top layer, so it's placed by hand under the button, as #parked is.
+newTrackerForm.addEventListener("beforetoggle", (e) => {
+  if (e.newState !== "open") return
+  const box = newTracker.getBoundingClientRect()
+  newTrackerForm.style.top = `${box.bottom + 4}px`
+  newTrackerForm.style.right = `${document.documentElement.clientWidth - box.right}px`
+  const w = state.tabs.find((t) => t.id === state.focused)
+  newTrackerFor.textContent = w ? `New tracker in ${w.name}` : ""
+  goalNote.textContent = "⌘↵ sends"
+})
+newTrackerForm.addEventListener("toggle", () => {
+  if (newTrackerForm.matches(":popover-open")) goalBox.focus()
+})
+goalBox.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+    e.preventDefault()
+    void sendGoal()
+  }
+})
+goalSend.addEventListener("click", () => void sendGoal())
+
+async function sendGoal() {
+  const tab = state.focused
+  const goal = goalBox.value
+  if (!tab || !goal.trim() || goalSend.disabled) return
+  goalSend.disabled = true
+  try {
+    const res = await fetch("new-tracker", {
+      method: "POST",
+      body: JSON.stringify({ tab, goal }),
+    })
+    if (!res.ok) {
+      goalNote.textContent = await res.text()
+      return
+    }
+    const { status }: { status: "sent" | "held" } = await res.json()
+    goalBox.value = ""
+    goalNote.textContent =
+      status === "sent"
+        ? "Sent to the tab's agent."
+        : "No agent in the tab yet; the next one gets it."
+    setTimeout(() => newTrackerForm.hidePopover(), 1500)
+  } finally {
+    goalSend.disabled = false
+  }
 }
 
 // The log pane's tabs: the jj log, or the workspace's tests (tests_view.ts),

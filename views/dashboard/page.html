@@ -387,6 +387,78 @@
         color: var(--muted);
         padding: 20px;
       }
+      #new-tracker {
+        flex: none;
+        padding: 2px 9px;
+        font: inherit;
+        border-radius: 5px;
+        border: 1px solid var(--border);
+        background: none;
+        color: var(--muted);
+        cursor: pointer;
+      }
+      #new-tracker:hover,
+      body:has(#new-tracker-form:popover-open) #new-tracker {
+        color: var(--accent);
+        border-color: var(--accent);
+      }
+      #new-tracker:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
+      /* Under the button, placed by client.ts as #parked is */
+      #new-tracker-form {
+        inset: auto;
+        margin: 0;
+        width: min(48ch, calc(100vw - 32px));
+        padding: 10px;
+        border: 1px solid var(--border);
+        border-radius: 5px;
+        background: var(--bg);
+        color: var(--text);
+        box-shadow: 0 4px 12px rgb(0 0 0 / 0.3);
+      }
+      #new-tracker-for {
+        color: var(--muted);
+        font-size: 0.9em;
+        margin-bottom: 6px;
+      }
+      #new-tracker-goal {
+        display: block;
+        box-sizing: border-box;
+        width: 100%;
+        resize: vertical;
+        font: inherit;
+        padding: 6px 8px;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        background: var(--surface);
+        color: var(--text);
+      }
+      .new-tracker-row {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 10px;
+        margin-top: 6px;
+      }
+      #new-tracker-note {
+        color: var(--muted);
+        font-size: 0.9em;
+      }
+      #new-tracker-send {
+        font: inherit;
+        padding: 2px 12px;
+        border-radius: 5px;
+        border: 1px solid var(--border);
+        background: var(--accent-bg);
+        color: var(--accent);
+        cursor: pointer;
+      }
+      #new-tracker-send:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
       #status {
         flex: none;
         width: 10px;
@@ -405,6 +477,7 @@
   <body>
     <div id="top">
       <nav id="strip"></nav>
+      <button id="new-tracker" popovertarget="new-tracker-form">Add tracker</button>
       <div id="status" title="disconnected"></div>
     </div>
     <main>
@@ -430,6 +503,18 @@
         <div class="doc-name" id="doc-name"></div>
       </div>
     </main>
+    <div id="new-tracker-form" popover>
+      <div id="new-tracker-for"></div>
+      <textarea
+        id="new-tracker-goal"
+        rows="4"
+        placeholder="What's the goal? The tab's agent makes the tracker."
+      ></textarea>
+      <div class="new-tracker-row">
+        <span id="new-tracker-note">⌘↵ sends</span>
+        <button id="new-tracker-send">Send</button>
+      </div>
+    </div>
     <script type="module" src="../markdown/preview.js"></script>
     <script type="module" src="client.js"></script>
   </body>
