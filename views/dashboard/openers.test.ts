@@ -1,6 +1,6 @@
 import { expect, test } from "vitest"
 import type { Tab } from "../../core/model.ts"
-import { docLaunch, paneIn } from "./openers.ts"
+import { docLaunch, nvimFloat, paneIn } from "./openers.ts"
 
 const tab = (focused: string | null, ...blocks: string[]): Tab => ({
   id: "tab:1",
@@ -42,5 +42,13 @@ test("a doc opens with ah view open from the workspace, as the tab's pane", () =
     args: ["/opt/ah/ah.ts", "view", "open", "--port", "7420", "/ws/notes/a.md"],
     cwd: "/ws",
     env: { REX_SESSION: "session:1", REX_BLOCK: "block:b" },
+  })
+})
+
+test("a file opens in nvim from the workspace, in a float named for it", () => {
+  expect(nvimFloat("/ws/src/x.ts", "/ws")).toEqual({
+    label: "x.ts",
+    command: ["nvim", "/ws/src/x.ts"],
+    cwd: "/ws",
   })
 })

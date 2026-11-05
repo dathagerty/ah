@@ -20,16 +20,16 @@ import {
   type WorkspaceTrackers,
 } from "../../core/model.ts"
 import { Presence } from "../../platform/presence.ts"
-import { selectTab } from "../../platform/rex.ts"
+import { openFloat, selectTab } from "../../platform/rex.ts"
 import { LogWatcher, SnapshotWatcher } from "./jj.ts"
 import { resolveLink } from "./links.ts"
-import { docLaunch, type Launch, paneIn } from "./openers.ts"
+import { docLaunch, type Launch, nvimFloat, type Pane, paneIn } from "./openers.ts"
 import { run } from "../../platform/proc.ts"
+import { rootFinder } from "../../core/workspace.ts"
+import { type DashTab, focusedRoot, resolve, type State } from "./workspace.ts"
 
 /** How to run ah itself, as the server was run */
 const AH = [process.execPath, ...process.execArgv, process.argv[1]]
-import { rootFinder } from "../../core/workspace.ts"
-import { focusedRoot, resolve, type State } from "./workspace.ts"
 
 // Changes on every server start. The page reloads when it reconnects to a
 // different server, so restarting the server is enough to pick up page edits.
@@ -266,8 +266,26 @@ export class Dashboard {
       return await this.#launch(
         docLaunch(target.path, tab.root, pane, this.options.port, AH),
       )
-    // nvim and skepsis come next
+    if (target.open === "nvim") return await this.#openNvim(target.path, tab, pane)
+    // skepsis comes next
     return new Response(`can't open in ${target.open} yet`, { status: 501 })
+  }
+
+  /** nvim in a float over the tab, which Rex then shows: the click was to
+   * edit the file */
+  async #openNvim(path: string, tab: DashTab, pane: Pane): Promise<Response> {
+    try {
+      await openFloat(pane.session, pane.block, {
+        ...nvimFloat(path, tab.root),
+        focus: true,
+      })
+    } catch (e) {
+      console.error("ah:", e)
+      return new Response("couldn't open nvim in the tab", { status: 502 })
+    }
+    // The float is open either way; this only brings its tab to the front
+    await selectTab(tab.session, tab.id).catch((e) => console.error("ah:", e))
+    return new Response(null, { status: 204 })
   }
 
   /** Run an opener to completion; its error goes to the page and the log */

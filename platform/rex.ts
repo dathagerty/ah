@@ -310,11 +310,17 @@ export async function selectTab(session: string, tab: string): Promise<void> {
  * closes when the command exits. The tab is named because Rex otherwise puts
  * the float in its active tab, which may be another. Rex runs the command
  * through a login shell, which can skip PATH setup an interactive shell does,
- * so it gets this process's PATH in front. */
+ * so it gets this process's PATH in front. It runs in `cwd`, this process's
+ * by default. */
 export async function openFloat(
   session: string,
   block: string,
-  { label, command, focus }: { label: string; command: string[]; focus: boolean },
+  {
+    label,
+    command,
+    focus,
+    cwd = process.cwd(),
+  }: { label: string; command: string[]; focus: boolean; cwd?: string },
 ): Promise<void> {
   const view = parseView(await call("session.view", { session_id: session }))
   const tab = view?.windows.find((w) => w.blocks.includes(block))
@@ -329,7 +335,7 @@ export async function openFloat(
         flavor: "com.superlogical.terminal.shell",
         label,
         options: {
-          cwd: process.cwd(),
+          cwd,
           path_prepend: process.env.PATH?.split(":") ?? [],
           command,
         },

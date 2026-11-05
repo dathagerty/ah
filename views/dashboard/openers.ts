@@ -4,6 +4,7 @@
 // `ah view open` then binds the file to that tab's agent, and a diff
 // review's `ah message send` reaches it, as when run from that pane.
 
+import { basename } from "node:path"
 import type { Tab } from "../../core/model.ts"
 
 /** A pane to run an opener as */
@@ -24,6 +25,11 @@ export interface Launch {
 export function paneIn(session: string, tab: Tab): Pane | null {
   const block = tab.focused ?? tab.blocks[0]?.id
   return block ? { session, block } : null
+}
+
+/** A float in the tab running nvim on the file, as `openFloat` takes it */
+export function nvimFloat(path: string, root: string) {
+  return { label: basename(path), command: ["nvim", path], cwd: root }
 }
 
 /** `ah view open` on the file. `ah` is how to run ah: node, its flags, and
