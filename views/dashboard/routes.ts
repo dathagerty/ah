@@ -23,6 +23,11 @@ import { Presence } from "../../platform/presence.ts"
 import { selectTab } from "../../platform/rex.ts"
 import { LogWatcher, SnapshotWatcher } from "./jj.ts"
 import { resolveLink } from "./links.ts"
+import { docLaunch, type Launch, paneIn } from "./openers.ts"
+import { run } from "../../platform/proc.ts"
+
+/** How to run ah itself, as the server was run */
+const AH = [process.execPath, ...process.execArgv, process.argv[1]]
 import { rootFinder } from "../../core/workspace.ts"
 import { focusedRoot, resolve, type State } from "./workspace.ts"
 
@@ -74,6 +79,8 @@ export interface DashboardOptions {
   html: HtmlBackend
   /** The agents, whose files the tabs show */
   core: Core
+  /** The server's, for the commands that open links from the log */
+  port: number
 }
 
 /** How often the stream says the server is still there; the page goes grey
@@ -249,8 +256,29 @@ export class Dashboard {
     if (!tab) return new Response("no such tab", { status: 404 })
     const result = await resolveLink(tab.root, link)
     if (!result.ok) return new Response(result.error, { status: result.status })
-    // Opening each target comes next
-    return new Response(`can't open in ${result.target.open} yet`, { status: 501 })
+    const rexTab = this.#rex?.sessions
+      .find((s) => s.id === tab.session)
+      ?.tabs.find((t) => t.id === tab.id)
+    const pane = rexTab && paneIn(tab.session, rexTab)
+    if (!pane) return new Response("no pane in the tab", { status: 404 })
+    const { target } = result
+    if (target.open === "doc")
+      return await this.#launch(
+        docLaunch(target.path, tab.root, pane, this.options.port, AH),
+      )
+    // nvim and skepsis come next
+    return new Response(`can't open in ${target.open} yet`, { status: 501 })
+  }
+
+  /** Run an opener to completion; its error goes to the page and the log */
+  async #launch({ cmd, args, cwd, env }: Launch): Promise<Response> {
+    const { success, stderr } = await run(cmd, args, {
+      cwd,
+      env: { ...process.env, ...env },
+    })
+    if (success) return new Response(null, { status: 204 })
+    console.error(`ah: ${args.join(" ")} failed:`, stderr)
+    return new Response(stderr.trim() || "couldn't open it", { status: 502 })
   }
 
   /** Show a tab in Rex, for a click on its chip, leaving focus on the dashboard */

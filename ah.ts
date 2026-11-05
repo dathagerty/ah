@@ -120,6 +120,7 @@ async function serve(port: number) {
     markdown: markdownBackend,
     html: htmlBackend,
     core,
+    port,
   })
   const tabTitles = new TitleSetter()
   const routes = {
