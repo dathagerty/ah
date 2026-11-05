@@ -45,6 +45,14 @@ test("a doc opens with ah view open from the workspace, as the tab's pane", () =
   })
 })
 
+test("nvim in a float starts at the line, when there is one", () => {
+  expect(nvimFloat("/ws/src/x.ts", "/ws", 13).command).toEqual([
+    "nvim",
+    "+13",
+    "/ws/src/x.ts",
+  ])
+})
+
 test("a file opens in nvim from the workspace, in a float named for it", () => {
   expect(nvimFloat("/ws/src/x.ts", "/ws")).toEqual({
     label: "x.ts",

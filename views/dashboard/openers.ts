@@ -27,9 +27,11 @@ export function paneIn(session: string, tab: Tab): Pane | null {
   return block ? { session, block } : null
 }
 
-/** A float in the tab running nvim on the file, as `openFloat` takes it */
-export function nvimFloat(path: string, root: string) {
-  return { label: basename(path), command: ["nvim", path], cwd: root }
+/** A float in the tab running nvim on the file, at `line` if given, as
+ * `openFloat` takes it */
+export function nvimFloat(path: string, root: string, line?: number) {
+  const at = line ? [`+${line}`] : []
+  return { label: basename(path), command: ["nvim", ...at, path], cwd: root }
 }
 
 /** One word to a POSIX shell, whatever's in it */

@@ -58,6 +58,25 @@ test("an ⌥-click opens nvim in a Rex float instead", async () => {
   })
 })
 
+test("a line goes along to nvim and the doc editor", async () => {
+  expect(await resolveLink(root, { file: "src/x.ts", line: 13 })).toEqual({
+    ok: true,
+    target: { open: "nvim", path: join(root, "src", "x.ts"), float: false, line: 13 },
+  })
+  expect(await resolveLink(root, { file: "notes/a.md", line: 2 })).toEqual({
+    ok: true,
+    target: { open: "doc", path: join(root, "notes", "a.md"), line: 2 },
+  })
+})
+
+test("a line is a whole number from 1", async () => {
+  for (const line of [0, -3, 1.5, "13"])
+    expect(await resolveLink(root, { file: "src/x.ts", line })).toMatchObject({
+      ok: false,
+      status: 400,
+    })
+})
+
 test("float has to be a boolean", async () => {
   expect(await resolveLink(root, { file: "src/x.ts", float: "yes" })).toMatchObject({
     ok: false,

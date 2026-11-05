@@ -115,7 +115,13 @@ async function focus(tab: string) {
 let logTab: "jj" | "tests" = "jj"
 const tests = new Map<string, TestsState>() // root -> its tests
 const testsAsked = new Set<string>() // roots the server was asked to list
-const testsView = new TestsView(testsPane, () => void testsRequest(true))
+const testsView = new TestsView(
+  testsPane,
+  () => void testsRequest(true),
+  (file, line, float) => {
+    if (state.focused) void openLink({ tab: state.focused, file, line, float })
+  },
+)
 
 async function testsRequest(run: boolean) {
   const tab = state.focused
@@ -162,6 +168,7 @@ async function openLink(body: {
   file?: string
   rev?: string
   float?: boolean
+  line?: number
 }) {
   const res = await fetch("open", { method: "POST", body: JSON.stringify(body) })
   if (!res.ok)
@@ -169,7 +176,7 @@ async function openLink(body: {
   // The split's socket; every other opener answers with no content
   if (res.status !== 200 || !body.file) return
   const { editor, doc }: { editor: string; doc: string } = await res.json()
-  openSplit(body.tab, body.file, editor, doc)
+  openSplit(body.tab, body.file, editor, doc, body.line)
 }
 
 // tab -> nvim on a file in the split under the log, on the doc editor's pane
@@ -182,7 +189,16 @@ const splits = new Map<
   { path: string; host: HTMLElement; doc: WebSocket; pane: TerminalPane | null }
 >()
 
-function openSplit(tab: string, path: string, editor: string, docUrl: string) {
+function openSplit(
+  tab: string,
+  path: string,
+  editor: string,
+  docUrl: string,
+  line?: number,
+) {
+  const open = splits.get(tab)
+  if (open?.path === path && open.pane)
+    return void (line && revealLine(open.pane, open.host, line))
   closeSplit(tab)
   const host = el("div", { className: "nvim-host" })
   nvimPane.append(host)
@@ -195,6 +211,14 @@ function openSplit(tab: string, path: string, editor: string, docUrl: string) {
     if (splits.get(tab) === split) closeSplit(tab)
   })
   split.pane.show()
+  if (line) void revealLine(split.pane, host, line)
+}
+
+/** Put nvim's cursor on the 1-based line, a third of the way down the pane */
+async function revealLine(pane: TerminalPane, host: HTMLElement, line: number) {
+  const box = host.getBoundingClientRect()
+  pane.show()
+  await pane.reveal(line - 1, 0, box.top + box.height / 3)
 }
 
 function closeSplit(tab: string) {

@@ -3,7 +3,9 @@
 // The dashboard's Tests tab, page side: a workspace's tests as a tree
 // (tests/tree.ts) from the server's TestsWatcher (tests/watcher.ts), with a
 // Run button. A node with a failure under it starts open; one the user
-// opened or closed stays that way across updates.
+// opened or closed stays that way across updates. A failure links to where
+// it happened, and a test the runner located links to where it's defined;
+// both open as the log's file links do, with ⌥ for a Rex float.
 
 import type { RunnerTests } from "./tests/model.ts"
 import { buildTree, type Counts, type TreeNode, totals } from "./tests/tree.ts"
@@ -44,18 +46,41 @@ export function testsBadge(s: TestsState | undefined): string {
   return ""
 }
 
+/** Opens a workspace file (relative to its root) at a 1-based line */
+export type OpenAt = (file: string, line: number, float: boolean) => void
+
 export class TestsView {
   readonly #host: HTMLElement
   readonly #onRun: () => void
+  readonly #onOpen: OpenAt
+  /** The shown workspace's root, which links are relative to */
+  #root = ""
   /** Node key -> whether it's open, for the nodes the user toggled */
   #open = new Map<string, boolean>()
 
-  constructor(host: HTMLElement, onRun: () => void) {
+  constructor(host: HTMLElement, onRun: () => void, onOpen: OpenAt) {
     this.#host = host
     this.#onRun = onRun
+    this.#onOpen = onOpen
+  }
+
+  /** A link to a line of a file in the workspace, or null for one outside it */
+  #link(file: string, line: number, text: string, title: string): HTMLElement | null {
+    if (!file.startsWith(`${this.#root}/`)) return null
+    const rel = file.slice(this.#root.length + 1)
+    const a = el("a", "tests-link", text)
+    a.title = title
+    a.addEventListener("click", (e) => {
+      // In a <summary>, a click would also fold the node
+      e.preventDefault()
+      e.stopPropagation()
+      this.#onOpen(rel, line, e.altKey)
+    })
+    return a
   }
 
   render(s: TestsState | undefined) {
+    this.#root = s?.root ?? ""
     const scroll = this.#host.scrollTop
     const run = el("button", "tests-run", "Run")
     run.addEventListener("click", () => this.#onRun())
@@ -108,10 +133,25 @@ export class TestsView {
   }
 
   #label(n: TreeNode): HTMLElement[] {
-    return [
+    const label = [
       el("span", `tests-icon ${n.status.replace(" ", "-")}`, ICON[n.status]),
       el("span", "tests-name", n.name),
     ]
+    const { file, line } = n.test ?? {}
+    const def = file && line ? this.#link(file, line, "↗", "Open where it's defined") : null
+    if (def) label.push(def)
+    return label
+  }
+
+  /** "failed at src/lib.rs:13", linked */
+  #failure(n: TreeNode): HTMLElement | null {
+    const at = n.result?.failure
+    if (!at) return null
+    const rel = at.file.startsWith(`${this.#root}/`)
+      ? at.file.slice(this.#root.length + 1)
+      : at.file
+    const link = this.#link(at.file, at.line, `${rel}:${at.line}`, "Open where it failed")
+    return link && el("div", "tests-failure", "failed at ", link)
   }
 
   #node(n: TreeNode, parent: string): HTMLElement {
@@ -122,6 +162,8 @@ export class TestsView {
     if (n.children.length && (n.counts.failed || n.counts.passed))
       summary.append(el("span", "tests-counts", countsText(n.counts)))
     const d = this.#details(key, n.counts.failed > 0, summary)
+    const failure = this.#failure(n)
+    if (failure) d.append(failure)
     if (output) d.append(el("pre", "tests-output", output))
     d.append(...n.children.map((c) => this.#node(c, key)))
     return d

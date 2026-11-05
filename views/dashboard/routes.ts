@@ -340,7 +340,7 @@ export class Dashboard {
         docLaunch(target.path, tab.root, pane, this.options.port, AH),
       )
     if (target.open === "nvim" && target.float)
-      return await this.#openNvim(target.path, tab, pane)
+      return await this.#openNvim(target.path, tab, pane, target.line)
     if (target.open === "nvim") return await this.#nvimSplit(target.path)
     return await this.#openSkepsis(target.rev, tab, pane)
   }
@@ -407,10 +407,15 @@ export class Dashboard {
 
   /** nvim in a float over the tab, which Rex then shows: the click was to
    * edit the file */
-  async #openNvim(path: string, tab: DashTab, pane: Pane): Promise<Response> {
+  async #openNvim(
+    path: string,
+    tab: DashTab,
+    pane: Pane,
+    line?: number,
+  ): Promise<Response> {
     try {
       await openFloat(pane.session, pane.block, {
-        ...nvimFloat(path, tab.root),
+        ...nvimFloat(path, tab.root, line),
         focus: true,
       })
     } catch (e) {

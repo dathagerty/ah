@@ -173,6 +173,21 @@
       .tests-icon.failed {
         color: var(--ansi-1);
       }
+      .tests-link {
+        margin-left: 8px;
+        color: var(--accent);
+        cursor: pointer;
+      }
+      .tests-link:hover {
+        text-decoration: underline;
+      }
+      .tests-failure {
+        color: var(--muted);
+        margin-top: 4px;
+      }
+      .tests-failure .tests-link {
+        margin-left: 0;
+      }
       .tests-output,
       .tests-error {
         font: inherit;
