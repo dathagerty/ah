@@ -11,6 +11,8 @@
 import type { State } from "./workspace.ts"
 import { neovim } from "../markdown/neovim.ts"
 import { TerminalPane } from "../markdown/terminal_pane.ts"
+import type { TestsState } from "./tests/watcher.ts"
+import { testsBadge, TestsView } from "./tests_view.ts"
 
 const byId = (id: string) => document.getElementById(id)!
 const strip = byId("strip")
@@ -22,6 +24,8 @@ const parkedMenu = byId("parked")
 const status = byId("status")
 const nvimPane = byId("nvim-pane")
 const nvimName = byId("nvim-name")
+const testsPane = byId("tests-pane")
+const testsBadgeEl = byId("tests-badge")
 
 let version: string | null = null
 let state: State = { focused: null, tabs: [] }
@@ -77,6 +81,7 @@ function render() {
   const w = tabs.find((t) => t.id === focused)
   renderDoc(w?.id ?? null)
   renderSplit()
+  renderLogTabs()
   if (!w) {
     logPane.replaceChildren(
       el("p", { className: "empty" }, "No jj workspace in the focused tab."),
@@ -104,6 +109,41 @@ async function focus(tab: string) {
   const res = await fetch("focus", { method: "POST", body: JSON.stringify({ tab }) })
   if (!res.ok) console.error("ah: focus failed:", res.status, await res.text())
 }
+
+// The log pane's tabs: the jj log, or the workspace's tests (tests_view.ts),
+// which the server starts listing the first time the tab is shown for it
+let logTab: "jj" | "tests" = "jj"
+const tests = new Map<string, TestsState>() // root -> its tests
+const testsAsked = new Set<string>() // roots the server was asked to list
+const testsView = new TestsView(testsPane, () => void testsRequest(true))
+
+async function testsRequest(run: boolean) {
+  const tab = state.focused
+  if (!tab) return
+  const res = await fetch("tests", { method: "POST", body: JSON.stringify({ tab, run }) })
+  if (!res.ok) console.error("ah: tests request failed:", res.status, await res.text())
+}
+
+function renderLogTabs() {
+  for (const t of document.querySelectorAll<HTMLElement>(".log-tab"))
+    t.classList.toggle("current", t.dataset.tab === logTab)
+  logPane.hidden = logTab !== "jj"
+  testsPane.hidden = logTab !== "tests"
+  const root = focusedRoot()
+  testsBadgeEl.textContent = testsBadge(root ? tests.get(root) : undefined)
+  if (logTab !== "tests" || !root) return
+  if (!testsAsked.has(root)) {
+    testsAsked.add(root)
+    void testsRequest(false)
+  }
+  testsView.render(tests.get(root))
+}
+
+for (const t of document.querySelectorAll<HTMLElement>(".log-tab"))
+  t.addEventListener("click", () => {
+    logTab = t.dataset.tab === "tests" ? "tests" : "jj"
+    renderLogTabs()
+  })
 
 // A file or change ID in the log (ansi.ts) opens in the doc editor, nvim,
 // or skepsis; the server picks which (links.ts). nvim opens in the split
@@ -343,6 +383,13 @@ events.addEventListener("jj", (e) => {
   const { root, html }: { root: string; html: string } = JSON.parse(e.data)
   logs.set(root, html)
   if (root === focusedRoot()) render()
+})
+events.addEventListener("tests", (e) => {
+  const s: TestsState = JSON.parse(e.data)
+  tests.set(s.root, s)
+  // Listed already, for this page or another
+  testsAsked.add(s.root)
+  if (s.root === focusedRoot()) renderLogTabs()
 })
 events.addEventListener("trackers", (e) => {
   const {

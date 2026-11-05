@@ -1,4 +1,5 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { execFileSync, spawnSync } from "node:child_process"
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { test } from "vitest"
@@ -140,3 +141,38 @@ test("a SnapshotWatcher on a removed workspace logs instead of throwing", () => 
   rmSync(dir, { recursive: true })
   new SnapshotWatcher(dir).close()
 })
+
+const hasJj = spawnSync("jj", ["--version"]).status === 0
+
+test.skipIf(!hasJj)(
+  "a SnapshotWatcher reports the files jj saw change once edits settle, not ignored ones",
+  async () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "ah-snapshot-")))
+    const jj = (...args: string[]) => execFileSync("jj", args, { cwd: dir, stdio: "pipe" })
+    jj("git", "init")
+    writeFileSync(join(dir, ".gitignore"), "node_modules/\n")
+    mkdirSync(join(dir, "src"))
+    mkdirSync(join(dir, "node_modules"))
+    jj("util", "snapshot")
+    const reports: string[][] = []
+    const watcher = new SnapshotWatcher(
+      dir,
+      (changed) => reports.push(changed.toSorted()),
+      100,
+    )
+    try {
+      // fs.watch, and the watcher's starting commit, take a moment
+      await new Promise((resolve) => setTimeout(resolve, 300))
+      writeFileSync(join(dir, "src", "a.ts"), "a")
+      writeFileSync(join(dir, "b.go"), "b")
+      writeFileSync(join(dir, "node_modules", "c.js"), "c")
+      for (let waited = 0; !reports.length && waited < 5000; waited += 50)
+        await new Promise((resolve) => setTimeout(resolve, 50))
+      assertEquals(reports, [[join(dir, "b.go"), join(dir, "src", "a.ts")]])
+    } finally {
+      watcher.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  },
+  10_000,
+)

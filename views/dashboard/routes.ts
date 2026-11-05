@@ -8,6 +8,7 @@
 // snapshotted once edits settle, so @ stays current between jj commands.
 
 import { type ChildProcess, spawn } from "node:child_process"
+import { realpathSync } from "node:fs"
 import { readFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import { join } from "node:path"
@@ -26,6 +27,9 @@ import { Presence } from "../../platform/presence.ts"
 import { openFloat, selectTab } from "../../platform/rex.ts"
 import { closeWindows } from "../../platform/window.ts"
 import { LogWatcher, SnapshotWatcher } from "./jj.ts"
+import { detectRunners } from "./tests/detect.ts"
+import { listTests, runTests } from "./tests/run.ts"
+import { TestsWatcher } from "./tests/watcher.ts"
 import { resolveLink } from "./links.ts"
 import {
   docLaunch,
@@ -111,6 +115,10 @@ export class Dashboard {
   #stateJson = JSON.stringify(this.#state)
   #logs = new Map<string, LogWatcher>()
   #snapshotter: SnapshotWatcher | null = null
+  /** root -> its tests, from the first time the page opens its Tests tab */
+  #tests = new Map<string, TestsWatcher>()
+  /** Whether cargo-nextest is installed, asked once */
+  #nextest: Promise<boolean> | null = null
   #clients = new Set<Client>()
   /** Whether a dashboard window is open, for telling agents when none is
    * (core/notices.ts) */
@@ -237,6 +245,11 @@ export class Dashboard {
       watcher.close()
       this.#logs.delete(root)
     }
+    for (const [root, tests] of this.#tests) {
+      if (open.has(root)) continue
+      tests.close()
+      this.#tests.delete(root)
+    }
     for (const root of open) {
       if (this.#logs.has(root)) continue
       this.#logs.set(
@@ -249,7 +262,10 @@ export class Dashboard {
     const focused = focusedRoot(this.#state)
     if (this.#snapshotter?.root !== focused) {
       this.#snapshotter?.close()
-      this.#snapshotter = focused ? new SnapshotWatcher(focused) : null
+      // Its changes run the tests they touch, once the Tests tab is open there
+      this.#snapshotter = focused
+        ? new SnapshotWatcher(focused, (changed) => this.#tests.get(focused)?.run(changed))
+        : null
     }
   }
 
@@ -266,7 +282,44 @@ export class Dashboard {
     if (rest === "focus" && req.method === "POST") return await this.#focus(req)
     if (rest === "tracker" && req.method === "POST") return await this.#pickTracker(req)
     if (rest === "open" && req.method === "POST") return await this.#openLink(req)
+    if (rest === "tests" && req.method === "POST") return await this.#testsRequest(req)
     return new Response("not found", { status: 404 })
+  }
+
+  /** The page opened a tab's Tests tab, which starts listing its
+   * workspace's tests, or clicked Run */
+  async #testsRequest(req: Request): Promise<Response> {
+    const { tab: id, run }: { tab?: unknown; run?: unknown } = await req.json()
+    const tab = this.#state.tabs.find((t) => t.id === id)
+    if (!tab) return new Response("no such tab", { status: 404 })
+    const tests = this.#testsFor(tab.root)
+    if (run === true) tests.run(null)
+    return new Response(null, { status: 204 })
+  }
+
+  #testsFor(root: string): TestsWatcher {
+    let tests = this.#tests.get(root)
+    if (tests) return tests
+    this.#nextest ??= run("cargo", ["nextest", "--version"]).then(
+      (o) => o.success,
+      () => false,
+    )
+    const nextest = this.#nextest
+    // By its real path, as the snapshot watcher reports changes
+    let real = root
+    try {
+      real = realpathSync(root)
+    } catch {
+      /* gone; detection finds nothing */
+    }
+    tests = new TestsWatcher(root, {
+      detect: async () => detectRunners(real, { nextest: await nextest }),
+      list: listTests,
+      run: runTests,
+      onChange: (state) => this.#broadcast("tests", JSON.stringify(state)),
+    })
+    this.#tests.set(root, tests)
+    return tests
   }
 
   /** Open a file or change from a link in a tab's jj log, for a click on it */
@@ -428,6 +481,8 @@ export class Dashboard {
           if (watcher.html !== null) send(c, "jj", logEvent(root, watcher.html))
         }
         for (const json of this.#trackers.values()) send(c, "trackers", json)
+        for (const tests of this.#tests.values())
+          send(c, "tests", JSON.stringify(tests.state))
         for (const [tab, doc] of this.#shown) send(c, "doc", docEvent(tab, doc))
       },
       cancel: () => {

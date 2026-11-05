@@ -140,6 +140,16 @@ export function isIgnored(path: string): boolean {
   return path.split(sep).some((segment) => IGNORED_DIRS.has(segment))
 }
 
+/** @'s commit, without snapshotting; null if jj can't say */
+async function headOf(root: string): Promise<string | null> {
+  const { success, stdout } = await run(
+    "jj",
+    ["--ignore-working-copy", "log", "-r", "@", "--no-graph", "-T", "commit_id"],
+    { cwd: root },
+  ).catch(() => ({ success: false, stdout: "" }))
+  return success ? stdout.trim() || null : null
+}
+
 /** Long enough that a pause while typing doesn't become an operation of
  * its own and clutter the op log and evolog */
 const SNAPSHOT_DELAY_MS = 10_000
@@ -149,28 +159,70 @@ const SNAPSHOT_DELAY_MS = 10_000
  * SNAPSHOT_DELAY_MS, so `@` in the log reflects edits that no jj command has
  * seen yet. jj records an operation only when something changed, which then
  * fires the LogWatcher. Any jj command would take the same snapshot; this
- * only takes it sooner.
+ * only takes it sooner. Then it tells `onQuiet` which files changed since
+ * the last one, by their real paths, for the Tests tab to run what they
+ * touch.
  */
 export class SnapshotWatcher {
   #watcher: FSWatcher | null = null
   #timer: ReturnType<typeof setTimeout> | undefined
+  /** @ as of the last snapshot, to diff the next one against */
+  #head: string | null = null
   readonly root: string
+  readonly #onQuiet: (changed: string[]) => void
 
-  constructor(root: string) {
+  constructor(
+    root: string,
+    onQuiet: (changed: string[]) => void = () => {},
+    delayMs = SNAPSHOT_DELAY_MS,
+  ) {
     this.root = root
+    this.#onQuiet = onQuiet
+    let real: string
+    try {
+      // Gone if the workspace was removed while a tab was still in it
+      real = realpathSync(root)
+    } catch (e) {
+      console.error(`ah: can't watch files in ${root}:`, e)
+      return
+    }
     const onChange = (filename: string | null) => {
       if (filename && isIgnored(filename)) return
       clearTimeout(this.#timer)
-      this.#timer = setTimeout(() => this.#snapshot(), SNAPSHOT_DELAY_MS)
+      this.#timer = setTimeout(() => void this.#quiet(), delayMs)
     }
     try {
-      // Gone if the workspace was removed while a tab was still in it
-      this.#watcher = watch(realpathSync(root), { recursive: true }, (_e, f) => onChange(f))
+      this.#watcher = watch(real, { recursive: true }, (_e, f) => onChange(f))
     } catch (e) {
       console.error(`ah: can't watch files in ${root}:`, e)
       return
     }
     this.#watcher.on("error", (e) => console.error(`ah: can't watch files in ${root}:`, e))
+    void headOf(root).then((head) => (this.#head ??= head))
+  }
+
+  /** The files differ between @ now and @ at the last snapshot, by jj's
+   * diff: fs.watch on macOS names directories as often as files, and this
+   * leaves out ignored ones. An agent's jj commands in between snapshot
+   * too, and the diff still covers what they saw. */
+  async #quiet() {
+    await this.#snapshot()
+    const head = await headOf(this.root)
+    const from = this.#head
+    this.#head = head ?? from
+    if (!from || !head || from === head) return
+    const { success, stdout } = await run(
+      "jj",
+      ["--ignore-working-copy", "diff", "--from", from, "--to", head, "--name-only"],
+      { cwd: this.root },
+    )
+    if (!success) return
+    const real = realpathSync(this.root)
+    const changed = stdout
+      .split("\n")
+      .filter(Boolean)
+      .map((p) => join(real, p))
+    if (changed.length) this.#onQuiet(changed)
   }
 
   async #snapshot() {

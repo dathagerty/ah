@@ -89,6 +89,103 @@
         overflow: auto;
         padding: 16px 20px 20px;
       }
+      /* jj and Tests over the log pane, flat like the tracker tabs */
+      #log-tabs {
+        display: flex;
+        flex: none;
+        border-bottom: 1px solid var(--border);
+      }
+      .log-tab {
+        padding: 6px 14px;
+        font-size: 0.9em;
+        color: var(--muted);
+        cursor: pointer;
+        border-right: 1px solid var(--border);
+      }
+      .log-tab:hover {
+        color: inherit;
+      }
+      .log-tab.current {
+        color: var(--accent);
+        background: var(--accent-bg);
+      }
+      #tests-pane {
+        flex: 1 1 0;
+        min-height: 0;
+        overflow: auto;
+        padding: 10px 20px 20px;
+      }
+      #tests-pane[hidden],
+      #log-pane[hidden] {
+        display: none;
+      }
+      .tests-bar {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 10px;
+      }
+      .tests-run {
+        font: inherit;
+        padding: 2px 12px;
+        border-radius: 5px;
+        border: 1px solid var(--border);
+        background: var(--accent-bg);
+        color: var(--accent);
+        cursor: pointer;
+      }
+      .tests-run:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
+      .tests-status,
+      .tests-counts {
+        color: var(--muted);
+      }
+      .tests-counts {
+        margin-left: 10px;
+        font-size: 0.9em;
+      }
+      #tests-pane details > :not(summary) {
+        margin-left: 18px;
+      }
+      #tests-pane summary {
+        cursor: pointer;
+      }
+      .tests-section {
+        margin-bottom: 10px;
+      }
+      .tests-runner {
+        font-weight: bold;
+      }
+      .tests-leaf {
+        margin-left: 14px;
+      }
+      .tests-icon {
+        display: inline-block;
+        width: 1.4em;
+        text-align: center;
+        color: var(--muted);
+      }
+      .tests-icon.passed {
+        color: var(--ansi-2);
+      }
+      .tests-icon.failed {
+        color: var(--ansi-1);
+      }
+      .tests-output,
+      .tests-error {
+        font: inherit;
+        font-size: 0.9em;
+        margin: 4px 0 8px;
+        padding: 8px 10px;
+        border-left: 2px solid var(--border);
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      .tests-error {
+        border-left-color: var(--ansi-1);
+      }
       #nvim-pane {
         display: none;
         flex: 1 1 0;
@@ -297,9 +394,14 @@
     </div>
     <main>
       <div id="left">
+        <nav id="log-tabs">
+          <span class="log-tab current" data-tab="jj">jj</span>
+          <span class="log-tab" data-tab="tests">Tests <span id="tests-badge"></span></span>
+        </nav>
         <div id="log-pane">
           <p class="empty">Waiting for Rex…</p>
         </div>
+        <div id="tests-pane" hidden></div>
         <div id="nvim-pane">
           <div id="nvim-bar">
             <span id="nvim-name"></span>
