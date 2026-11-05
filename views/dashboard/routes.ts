@@ -31,6 +31,7 @@ import { detectRunners } from "./tests/detect.ts"
 import { listTests, runTests } from "./tests/run.ts"
 import { TestsWatcher } from "./tests/watcher.ts"
 import { resolveLink } from "./links.ts"
+import { forwardGoal } from "./new_tracker.ts"
 import {
   docLaunch,
   type Launch,
@@ -283,7 +284,30 @@ export class Dashboard {
     if (rest === "tracker" && req.method === "POST") return await this.#pickTracker(req)
     if (rest === "open" && req.method === "POST") return await this.#openLink(req)
     if (rest === "tests" && req.method === "POST") return await this.#testsRequest(req)
+    if (rest === "new-tracker" && req.method === "POST") return await this.#newTracker(req)
     return new Response("not found", { status: 404 })
+  }
+
+  /** A pane in the tab to act as, for what the server does on its behalf */
+  #paneOf(tab: DashTab): Pane | null {
+    const rexTab = this.#rex?.sessions
+      .find((s) => s.id === tab.session)
+      ?.tabs.find((t) => t.id === tab.id)
+    return (rexTab && paneIn(tab.session, rexTab)) ?? null
+  }
+
+  /** The new-tracker button: the goal goes to the tab's agent (new_tracker.ts) */
+  async #newTracker(req: Request): Promise<Response> {
+    const { tab: id, goal }: { tab?: unknown; goal?: unknown } = await req.json()
+    const tab = this.#state.tabs.find((t) => t.id === id)
+    if (!tab) return new Response("no such tab", { status: 404 })
+    const result = await forwardGoal(
+      (block, text) => this.options.core.send(block, text),
+      this.#paneOf(tab),
+      goal,
+    )
+    if (!result.ok) return new Response(result.error, { status: result.status })
+    return Response.json({ status: result.status })
   }
 
   /** The page opened a tab's Tests tab, which starts listing its
@@ -329,10 +353,7 @@ export class Dashboard {
     if (!tab) return new Response("no such tab", { status: 404 })
     const result = await resolveLink(tab.root, link)
     if (!result.ok) return new Response(result.error, { status: result.status })
-    const rexTab = this.#rex?.sessions
-      .find((s) => s.id === tab.session)
-      ?.tabs.find((t) => t.id === tab.id)
-    const pane = rexTab && paneIn(tab.session, rexTab)
+    const pane = this.#paneOf(tab)
     if (!pane) return new Response("no pane in the tab", { status: 404 })
     const { target } = result
     if (target.open === "doc")
