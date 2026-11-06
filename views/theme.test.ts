@@ -80,7 +80,7 @@ test("Rex's font is the terminal font, by family, size and weight", () => {
     }),
   )
   const root = block(css, "root")
-  expect(root["--term-font"]).toMatch(/^"Atkinson Hyperlegible Mono", ui-monospace/)
+  expect(root["--term-font"]).toMatch(/^"Atkinson Hyperlegible Mono", /)
   expect(root["--term-size"]).toBe("14px")
   expect(root["--term-weight"]).toBe("250")
   expect(root["--term-cell-height"]).toBe("0")
@@ -104,4 +104,21 @@ test("ah's own page parts take the theme: the conversation panel, the comment po
   expect(css).toMatch(/html #popover \{[^}]*color: var\(--term-fg\);/)
   expect(css).toMatch(/html:root \{[^}]*--t-page: var\(--term-bg\);/)
   expect(css).toMatch(/html:root \{[^}]*--t-red: var\(--ansi-1\);/)
+})
+
+test("glyphs the font lacks, like Nerd Font icons, fall back to a Nerd Font before the system's", () => {
+  const css = themeCss(
+    lookFrom({
+      ...none,
+      font: {
+        family: "Atkinson Hyperlegible Mono",
+        size: 14,
+        weight: 250,
+        cellHeightPercent: 0,
+      },
+    }),
+  )
+  const font = block(css, "root")["--term-font"]
+  expect(font).toMatch(/^"Atkinson Hyperlegible Mono", "Symbols Nerd Font Mono", /)
+  expect(font.indexOf("Nerd Font Mono")).toBeLessThan(font.indexOf("ui-monospace"))
 })

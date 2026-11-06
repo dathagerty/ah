@@ -7,10 +7,25 @@
 
 import type { Palette, RexLook } from "./rex_theme.ts"
 
+/** After the terminal font, for the glyphs it lacks: Nerd Font faces for the
+ * icons editors draw (Rex's terminal has its own for them; the standalone
+ * symbols font first, then common Nerd Font Monos, any that are installed),
+ * then the system's monospace */
+const FALLBACK_FONTS = [
+  '"Symbols Nerd Font Mono"',
+  '"JetBrainsMono Nerd Font Mono"',
+  '"FiraCode Nerd Font Mono"',
+  '"Hack Nerd Font Mono"',
+  "ui-monospace",
+  "SFMono-Regular",
+  "Menlo",
+  "monospace",
+].join(", ")
+
 export const theme = {
   background: "#020202",
   foreground: "#e6e1cf",
-  fontFamily: '"Berkeley Mono", ui-monospace, SFMono-Regular, Menlo, monospace',
+  fontFamily: `"Berkeley Mono", ${FALLBACK_FONTS}`,
   fontSize: 13,
   // ANSI colors 0–15
   ansi: [
@@ -42,9 +57,6 @@ const BUILT_IN: Palette = {
   selectionForeground: theme.foreground,
   ansi: theme.ansi,
 }
-
-/** What follows the family in --term-font, for glyphs it lacks */
-const FALLBACK_FONTS = "ui-monospace, SFMono-Regular, Menlo, monospace"
 
 /** The look pages get: a dark palette, a light one if Rex has one, and the
  * font */
