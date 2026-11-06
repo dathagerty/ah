@@ -13,12 +13,13 @@
     <title>Workspace</title>
     <!-- The terminal theme's vars (views/theme.ts) and the box-drawing rules -->
     <link rel="stylesheet" href="/theme.css" />
-    <link rel="stylesheet" href="/github-markdown-dark.css" />
+    <link rel="stylesheet" href="/github-markdown.css" />
     <link rel="stylesheet" href="../markdown/markdown.css" />
     <link rel="stylesheet" href="../markdown/xterm.css" />
     <style>
+      /* Light or dark with the OS, in Rex's themes (/theme.css) */
       :root {
-        color-scheme: dark;
+        color-scheme: light dark;
         --bg: var(--term-bg);
         --text: var(--term-fg);
         --muted: color-mix(in srgb, var(--term-fg) 65%, var(--term-bg));

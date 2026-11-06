@@ -44,11 +44,9 @@ import { contentTypes } from "../mime.ts"
 // Pages reload on every change, so nothing they load should be cached
 const noStore = { "cache-control": "no-store" }
 
-// For the dashboard's frames: dark over the page's own color-scheme, which
-// may leave it to the browser's, since the dashboard is dark whatever that
-// is; and see-through, so the page sits on the dashboard's background
-const dashboardStyle =
-  "<style>:root { color-scheme: dark !important; } html, body { background: transparent !important; }</style>"
+// For the dashboard's frames: see-through, so the page sits on the
+// dashboard's background. Light or dark is the OS's, as the dashboard's is.
+const dashboardStyle = "<style>html, body { background: transparent !important; }</style>"
 
 /** The file with ah's tags before </body>, or at the end without one.
  * `dashboard` is for the dashboard's frames of it, `status` the file's as a

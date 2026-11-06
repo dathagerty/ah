@@ -24,10 +24,10 @@ test("without </body>, at the end; with chat off, only the script", () => {
   expect(out).not.toContain("color-scheme")
 })
 
-test("in the dashboard, dark and see-through over the page's own style", () => {
+test("in the dashboard, see-through over the page's own style, in the OS's light or dark", () => {
   const out = inject("<p>hi</p>", "p-00000000", { chat: false, dashboard: true })
-  expect(out).toContain("color-scheme: dark !important")
   expect(out).toContain("background: transparent !important")
+  expect(out).not.toContain("color-scheme: dark")
 })
 
 describe("the API and pages ports", () => {

@@ -108,14 +108,8 @@ async function serve(port: number) {
       }
     return themed.css
   }
-  // The stylesheet follows the OS theme, as the markdown pages do. The
-  // dashboard is always dark, like the terminal, so its copy drops the light
-  // theme.
+  // Follows the OS theme, as every page does
   const markdownCss = await readFile(assetPath("views/github-markdown.min.css"), "utf8")
-  const markdownDarkCss = markdownCss.replace(
-    "@media (prefers-color-scheme:light)",
-    "@media not all",
-  )
 
   const chatCss = await readFile(assetPath("views/thread/chat.css"), "utf8")
   const taskListCss = await readFile(assetPath("views/html/task_list.css"), "utf8")
@@ -218,7 +212,6 @@ async function serve(port: number) {
       } satisfies Status)
     }
     if (pathname === "/github-markdown.css") return cssResponse(markdownCss)
-    if (pathname === "/github-markdown-dark.css") return cssResponse(markdownDarkCss)
     if (pathname === "/chat.css") return cssResponse(chatCss)
     if (pathname === "/theme.css") return themeStylesheet().then(cssResponse)
     return new Response("not found", { status: 404 })

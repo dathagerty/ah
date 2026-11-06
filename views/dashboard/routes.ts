@@ -192,8 +192,8 @@ export class Dashboard {
     this.#files = next
   }
 
-  /** Open the file in the backend that shows it. An html page is dark and
-   * see-through, to match the dashboard. */
+  /** Open the file in the backend that shows it. An html page is
+   * see-through, to sit on the dashboard's background. */
   async #show(path: string): Promise<ShownDoc | null> {
     if (fileKind(path) === "html") {
       const info = await this.options.html.show(path)

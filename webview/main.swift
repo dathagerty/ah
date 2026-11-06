@@ -158,9 +158,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
       defer: false)
     window.contentView = webView
     window.isReleasedWhenClosed = false
-    // Dark whatever the system's appearance, title bar and page alike: the
-    // web view inherits it, so prefers-color-scheme is dark too
-    window.appearance = NSAppearance(named: .darkAqua)
+    // Light or dark with the system, title bar and page alike: the web view
+    // inherits the window's appearance, so prefers-color-scheme follows it
     if options.otherDisplay, let screen = otherScreen() {
       window.setFrame(screen.visibleFrame, display: false)
     } else if !window.setFrameUsingName(options.url.path()) {
@@ -189,13 +188,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     let box = NSView(frame: webView.bounds)
     box.autoresizingMask = [.width, .height]
     box.wantsLayer = true
-    box.layer?.backgroundColor = NSColor(white: 0.07, alpha: 0.94).cgColor
+    box.layer?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.94).cgColor
     let label = NSTextField(
       wrappingLabelWithString:
         "Can't reach ah's server\n\(options.url.absoluteString)\n\n"
         + "\(error.localizedDescription)\nTrying again every 2 seconds")
     label.alignment = .center
-    label.textColor = .white
+    label.textColor = .labelColor
     label.font = .systemFont(ofSize: 14)
     label.translatesAutoresizingMaskIntoConstraints = false
     box.addSubview(label)
