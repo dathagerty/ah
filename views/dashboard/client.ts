@@ -17,6 +17,9 @@ import { prsBadge } from "./prs/github.ts"
 import type { Thread } from "./prs/threads.ts"
 import type { PrsState } from "./prs/watcher.ts"
 import { PrsView } from "./prs_view.ts"
+import type { Issue, Transition } from "./jira/jira.ts"
+import type { JiraState } from "./jira/watcher.ts"
+import { jiraBadge, JiraView } from "./jira_view.ts"
 
 const byId = (id: string) => document.getElementById(id)!
 const strip = byId("strip")
@@ -32,6 +35,8 @@ const testsPane = byId("tests-pane")
 const testsBadgeEl = byId("tests-badge")
 const prsPane = byId("prs-pane")
 const prsBadgeEl = byId("prs-badge")
+const issuesPane = byId("issues-pane")
+const issuesBadgeEl = byId("issues-badge")
 const newTracker = byId("new-tracker") as HTMLButtonElement
 const newTrackerForm = byId("new-tracker-form")
 const newTrackerFor = byId("new-tracker-for")
@@ -177,7 +182,35 @@ async function sendGoal() {
 
 // The log pane's tabs: the jj log, or the workspace's tests (tests_view.ts),
 // which the server starts listing the first time the tab is shown for it
-let logTab: "jj" | "tests" | "prs" = "jj"
+let logTab: "jj" | "tests" | "prs" | "issues" = "jj"
+// The Jira project's sprint, the same for every workspace for now
+let jira: JiraState | undefined
+let jiraAsked = false
+async function jiraPost<T>(route: string, body: object): Promise<T | string> {
+  const res = await fetch(route, {
+    method: "POST",
+    body: JSON.stringify({ tab: state.focused, ...body }),
+  })
+  if (!res.ok) return await res.text()
+  return res.status === 204 ? (null as T) : ((await res.json()) as T)
+}
+const jiraView = new JiraView(issuesPane, () => void jiraPost("jira", { refresh: true }), {
+  open: async (issue: Issue) => {
+    const r = await jiraPost<{ html: string; transitions: Transition[] }>("jira-issue", {
+      key: issue.key,
+    })
+    if (typeof r === "string") throw new Error(r)
+    return r
+  },
+  move: async (issue, transition) => {
+    const r = await jiraPost<null>("jira-transition", { key: issue.key, transition })
+    return typeof r === "string" ? r : null
+  },
+  track: async (issue) => {
+    const r = await jiraPost<{ status: string }>("jira-tracker", { key: issue.key })
+    return typeof r === "string" ? r : r.status
+  },
+})
 const prs = new Map<string, PrsState>() // root -> its PRs
 const prsAsked = new Set<string>() // roots the server was asked to fetch for
 const prsView = new PrsView(prsPane, () => void prsRequest(true), {
@@ -233,6 +266,16 @@ function renderLogTabs() {
   logPane.hidden = logTab !== "jj"
   testsPane.hidden = logTab !== "tests"
   prsPane.hidden = logTab !== "prs"
+  issuesPane.hidden = logTab !== "issues"
+  issuesBadgeEl.textContent = jiraBadge(jira)
+  if (logTab === "issues") {
+    if (!jiraAsked) {
+      jiraAsked = true
+      void jiraPost("jira", {})
+    }
+    jiraView.render(jira)
+    return
+  }
   const root = focusedRoot()
   testsBadgeEl.textContent = testsBadge(root ? tests.get(root) : undefined)
   const shownPrs = root ? prs.get(root) : undefined
@@ -256,7 +299,7 @@ function renderLogTabs() {
 for (const t of document.querySelectorAll<HTMLElement>(".log-tab"))
   t.addEventListener("click", () => {
     const name = t.dataset.tab
-    logTab = name === "tests" || name === "prs" ? name : "jj"
+    logTab = name === "tests" || name === "prs" || name === "issues" ? name : "jj"
     renderLogTabs()
   })
 
@@ -516,6 +559,11 @@ events.addEventListener("jj", (e) => {
   const { root, html }: { root: string; html: string } = JSON.parse(e.data)
   logs.set(root, html)
   if (root === focusedRoot()) render()
+})
+events.addEventListener("jira", (e) => {
+  jira = JSON.parse(e.data)
+  jiraAsked = true
+  renderLogTabs()
 })
 events.addEventListener("prs", (e) => {
   const s: PrsState = JSON.parse(e.data)

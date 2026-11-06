@@ -33,6 +33,8 @@ import { TestsWatcher } from "./tests/watcher.ts"
 import { githubRepos } from "./prs/github.ts"
 import { PR_FIELDS, PrsWatcher } from "./prs/watcher.ts"
 import { parseThreads, THREADS_QUERY, threadMessage } from "./prs/threads.ts"
+import { adfToHtml, adfToText, issueGoal, parseTransitions } from "./jira/jira.ts"
+import { JiraWatcher } from "./jira/watcher.ts"
 import { resolveLink } from "./links.ts"
 import { forwardGoal } from "./new_tracker.ts"
 import {
@@ -52,6 +54,11 @@ const AH = [process.execPath, ...process.execArgv, process.argv[1]]
 
 /** Where the skepsis skill runs it from (skills/skepsis/SKILL.md) */
 const SKEPSIS = join(homedir(), "code/utilities/skepsis/cli.ts")
+
+// HACK: the Jira project is hard-coded to David's team until ah has
+// settings: a JSON config with a settings pane, its own tracker. Extract it
+// then, as a workspace-to-project mapping.
+const JIRA_PROJECT = "EDGE"
 
 /** How long skepsis gets to start listening before a click gives up */
 const SKEPSIS_START_MS = 15_000
@@ -123,6 +130,11 @@ export class Dashboard {
   #tests = new Map<string, TestsWatcher>()
   /** root -> its PRs, from the first time the page opens its PRs tab */
   #prs = new Map<string, PrsWatcher>()
+  /** The Jira project's sprint, from the first time the page opens the
+   * Issues tab */
+  #jira: JiraWatcher | null = null
+  /** The Jira host acli is signed in to, asked once */
+  #jiraSite: Promise<string> | null = null
   /** Whether cargo-nextest is installed, asked once */
   #nextest: Promise<boolean> | null = null
   #clients = new Set<Client>()
@@ -302,6 +314,12 @@ export class Dashboard {
     if (rest === "pr-threads" && req.method === "POST") return await this.#prThreads(req)
     if (rest === "pr-thread-send" && req.method === "POST")
       return await this.#sendThread(req)
+    if (rest === "jira" && req.method === "POST") return await this.#jiraRequest(req)
+    if (rest === "jira-issue" && req.method === "POST") return await this.#jiraIssue(req)
+    if (rest === "jira-transition" && req.method === "POST")
+      return await this.#jiraTransition(req)
+    if (rest === "jira-tracker" && req.method === "POST")
+      return await this.#jiraTracker(req)
     return new Response("not found", { status: 404 })
   }
 
@@ -430,6 +448,152 @@ export class Dashboard {
     if (!thread) return new Response("no such thread on the PR", { status: 404 })
     const status = await this.options.core.send(pane.block, threadMessage(pr, thread))
     return Response.json({ status })
+  }
+
+  /** The page opened the Issues tab, which starts fetching the sprint, or
+   * clicked Refresh */
+  async #jiraRequest(req: Request): Promise<Response> {
+    const { refresh }: { refresh?: unknown } = await req.json()
+    const known = this.#jira !== null
+    const jira = this.#jiraWatcher()
+    if (!known || refresh === true) void jira.refresh()
+    return new Response(null, { status: 204 })
+  }
+
+  #jiraWatcher(): JiraWatcher {
+    if (this.#jira) return this.#jira
+    this.#jiraSite ??= run("acli", ["jira", "auth", "status"]).then(
+      (o) => /Site:\s*(\S+)/.exec(o.stdout)?.[1] ?? "atlassian.net",
+      () => "atlassian.net",
+    )
+    const site = this.#jiraSite
+    this.#jira = new JiraWatcher(JIRA_PROJECT, {
+      search: async () => {
+        const jql = `project = ${JIRA_PROJECT} AND sprint in openSprints() ORDER BY status, updated DESC`
+        const o = await run("acli", [
+          "jira",
+          "workitem",
+          "search",
+          "--jql",
+          jql,
+          "--fields",
+          "key,summary,status,assignee,issuetype,priority",
+          "--paginate",
+          "--json",
+        ])
+        if (!o.success) throw new Error(o.stderr.trim() || `acli exited with ${o.code}`)
+        return o.stdout
+      },
+      site: () => site,
+      onChange: (state) => this.#broadcast("jira", JSON.stringify(state)),
+    })
+    return this.#jira
+  }
+
+  /** A ticket in the sprint the Issues tab lists; the page can't name another */
+  async #listedIssue(req: Request) {
+    const body: { tab?: unknown; key?: unknown; transition?: unknown } = await req.json()
+    const tab = this.#state.tabs.find((t) => t.id === body.tab)
+    const issue = this.#jira?.state.issues.find((i) => i.key === body.key)
+    return { tab, issue, transition: body.transition }
+  }
+
+  async #issueDescription(key: string): Promise<unknown> {
+    const o = await run("acli", [
+      "jira",
+      "workitem",
+      "view",
+      key,
+      "--fields",
+      "description",
+      "--json",
+    ])
+    if (!o.success) throw new Error(o.stderr.trim() || `acli exited with ${o.code}`)
+    return (JSON.parse(o.stdout) as { fields?: { description?: unknown } }).fields
+      ?.description
+  }
+
+  async #issueTransitions(key: string) {
+    const o = await run("twg", [
+      "jira",
+      "workitem",
+      "transitions",
+      "query",
+      "--id",
+      key,
+      "-o",
+      "json",
+      "--output-summary",
+      "none",
+    ])
+    if (!o.success) throw new Error(o.stderr.trim() || `twg exited with ${o.code}`)
+    return parseTransitions(o.stdout)
+  }
+
+  /** A ticket's description (as safe HTML, jira.ts) and the statuses it can
+   * move to, when the page opens it */
+  async #jiraIssue(req: Request): Promise<Response> {
+    const { issue } = await this.#listedIssue(req)
+    if (!issue) return new Response("not a ticket in the sprint", { status: 404 })
+    try {
+      const [description, transitions] = await Promise.all([
+        this.#issueDescription(issue.key),
+        this.#issueTransitions(issue.key),
+      ])
+      return Response.json({ html: adfToHtml(description), transitions })
+    } catch (e) {
+      return new Response(e instanceof Error ? e.message : String(e), { status: 502 })
+    }
+  }
+
+  /** Move a ticket along one of the transitions Jira offers it now */
+  async #jiraTransition(req: Request): Promise<Response> {
+    const { issue, transition } = await this.#listedIssue(req)
+    if (!issue) return new Response("not a ticket in the sprint", { status: 404 })
+    try {
+      const offered = await this.#issueTransitions(issue.key)
+      if (!offered.some((t) => t.id === transition))
+        return new Response("not a transition Jira offers this ticket", { status: 400 })
+      const o = await run("twg", [
+        "jira",
+        "workitem",
+        "transition",
+        "--id",
+        issue.key,
+        "--transition-id",
+        String(transition),
+        "-o",
+        "json",
+        "--output-summary",
+        "none",
+      ])
+      if (!o.success) throw new Error(o.stderr.trim() || `twg exited with ${o.code}`)
+    } catch (e) {
+      return new Response(e instanceof Error ? e.message : String(e), { status: 502 })
+    }
+    void this.#jira?.refresh()
+    return new Response(null, { status: 204 })
+  }
+
+  /** Start a tracker on a ticket: its key, summary, link and description go
+   * to the tab's agent, as the Add tracker button's goal does (new_tracker.ts) */
+  async #jiraTracker(req: Request): Promise<Response> {
+    const { tab, issue } = await this.#listedIssue(req)
+    if (!tab) return new Response("no such tab", { status: 404 })
+    if (!issue) return new Response("not a ticket in the sprint", { status: 404 })
+    let description = ""
+    try {
+      description = adfToText(await this.#issueDescription(issue.key))
+    } catch {
+      /* the key, summary and link are enough to start on */
+    }
+    const result = await forwardGoal(
+      (block, text) => this.options.core.send(block, text),
+      this.#paneOf(tab),
+      issueGoal(issue, description),
+    )
+    if (!result.ok) return new Response(result.error, { status: result.status })
+    return Response.json({ status: result.status })
   }
 
   /** A jj operation changed the workspace's log; a push refreshes its PRs */
@@ -666,6 +830,7 @@ export class Dashboard {
         for (const tests of this.#tests.values())
           send(c, "tests", JSON.stringify(tests.state))
         for (const prs of this.#prs.values()) send(c, "prs", JSON.stringify(prs.state))
+        if (this.#jira) send(c, "jira", JSON.stringify(this.#jira.state))
         for (const [tab, doc] of this.#shown) send(c, "doc", docEvent(tab, doc))
       },
       cancel: () => {

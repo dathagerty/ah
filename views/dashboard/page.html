@@ -116,7 +116,8 @@
         overflow: auto;
         padding: 10px 20px 20px;
       }
-      #prs-pane {
+      #prs-pane,
+      #issues-pane {
         flex: 1 1 0;
         min-height: 0;
         overflow: auto;
@@ -124,6 +125,7 @@
       }
       #tests-pane[hidden],
       #prs-pane[hidden],
+      #issues-pane[hidden],
       #log-pane[hidden] {
         display: none;
       }
@@ -179,6 +181,53 @@
       }
       .tests-icon.pending {
         color: var(--ansi-3);
+      }
+      .jira-issue > summary {
+        cursor: pointer;
+        list-style: none;
+      }
+      .jira-issue > summary::-webkit-details-marker {
+        display: none;
+      }
+      .pr-state.jira-progress {
+        color: var(--ansi-4);
+        border-color: var(--ansi-4);
+      }
+      .pr-state.jira-done {
+        color: var(--ansi-2);
+        border-color: var(--ansi-2);
+      }
+      .jira-description {
+        margin: 6px 0;
+        overflow-wrap: anywhere;
+      }
+      .jira-description .adf-panel {
+        padding: 6px 10px;
+        border-left: 2px solid var(--accent);
+        background: var(--surface);
+      }
+      .jira-description pre {
+        white-space: pre-wrap;
+        padding: 6px 8px;
+        border: 1px solid var(--border);
+      }
+      .jira-description a {
+        color: var(--accent);
+      }
+      .jira-actions {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 6px 0 4px;
+      }
+      .jira-status {
+        font: inherit;
+        color: var(--text);
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 5px;
+        padding: 2px 6px;
       }
       .pr-thread {
         margin: 6px 0 10px;
@@ -575,12 +624,16 @@
           <span class="log-tab current" data-tab="jj">jj</span>
           <span class="log-tab" data-tab="tests">Tests <span id="tests-badge"></span></span>
           <span class="log-tab" data-tab="prs">PRs <span id="prs-badge"></span></span>
+          <span class="log-tab" data-tab="issues"
+            >Issues <span id="issues-badge"></span
+          ></span>
         </nav>
         <div id="log-pane">
           <p class="empty">Waiting for Rex…</p>
         </div>
         <div id="tests-pane" hidden></div>
         <div id="prs-pane" hidden></div>
+        <div id="issues-pane" hidden></div>
         <div id="nvim-pane">
           <div id="nvim-bar">
             <span id="nvim-name"></span>
