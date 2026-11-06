@@ -9,6 +9,7 @@
 import type { CheckState, Pr } from "./prs/github.ts"
 import { commentDoc, type CommentLook } from "./prs/comment_doc.ts"
 import { reviewId } from "./prs/review.ts"
+import type { Conversation, ConversationItem } from "./prs/conversation.ts"
 import type { Thread, ThreadComment } from "./prs/threads.ts"
 import type { PrsState } from "./prs/watcher.ts"
 
@@ -77,6 +78,10 @@ export interface ThreadActions {
   done: (name: string) => Promise<string | null>
   /** Your own PR in skepsis, from its base; null or the error */
   skepsis: (pr: Pr) => Promise<string | null>
+  /** The PR's description, comments and reviews */
+  conversation: (pr: Pr) => Promise<Conversation>
+  /** Send a comment or review to the agent; "sent", "held", or an error */
+  sendItem: (pr: Pr, item: ConversationItem) => Promise<string>
 }
 
 type Loaded = { threads: Thread[] } | { error: string } | "loading"
@@ -90,6 +95,11 @@ export class PrsView {
   #open = new Map<string, boolean>()
   /** PR url -> its threads, kept across updates */
   #threads = new Map<string, Loaded>()
+  /** PR url -> its conversation, kept across updates */
+  #conversations = new Map<
+    string,
+    { conversation: Conversation } | { error: string } | "loading"
+  >()
   /** Thread id -> what sending it came to */
   #sent = new Map<string, string>()
   /** Review workspace name -> what the last action on it came to */
@@ -207,7 +217,7 @@ export class PrsView {
         )
       box.append(checks)
     }
-    box.append(this.#threadsBox(pr))
+    box.append(this.#conversationBox(pr), this.#threadsBox(pr))
     return box
   }
 
@@ -282,6 +292,97 @@ export class PrsView {
     return [el("span", "tests-status", "Delete its workspace and directory?"), yes, no]
   }
 
+  #conversationBox(pr: Pr): HTMLElement {
+    const key = `${pr.url} conversation`
+    const d = el(
+      "details",
+      "pr-checks",
+      el("summary", "", "Conversation"),
+    ) as HTMLDetailsElement
+    d.open = this.#open.get(key) ?? false
+    d.addEventListener("toggle", () => {
+      this.#open.set(key, d.open)
+      if (d.open && !this.#conversations.has(pr.url)) void this.#loadConversation(pr)
+    })
+    const loaded = this.#conversations.get(pr.url)
+    if (loaded === "loading") d.append(el("p", "tests-status", "Loading…"))
+    else if (loaded && "error" in loaded) d.append(el("pre", "tests-error", loaded.error))
+    else if (loaded) {
+      const { description, items } = loaded.conversation
+      d.append(
+        el(
+          "div",
+          "pr-thread",
+          el(
+            "div",
+            "pr-thread-head",
+            el("span", "pr-thread-where", `${description.author} opened it`),
+          ),
+          this.#frame(description.html, description.body || "No description."),
+        ),
+      )
+      for (const item of items) d.append(this.#item(pr, item))
+    }
+    return d
+  }
+
+  async #loadConversation(pr: Pr) {
+    this.#conversations.set(pr.url, "loading")
+    this.render(this.#last)
+    try {
+      this.#conversations.set(pr.url, {
+        conversation: await this.#actions.conversation(pr),
+      })
+    } catch (e) {
+      this.#conversations.set(pr.url, { error: e instanceof Error ? e.message : String(e) })
+    }
+    this.render(this.#last)
+  }
+
+  #item(pr: Pr, item: ConversationItem): HTMLElement {
+    const verdict =
+      item.state === "approved"
+        ? "approved"
+        : item.state === "changes"
+          ? "requested changes"
+          : item.state
+            ? "reviewed"
+            : "commented"
+    const send = el("button", "tests-run", "Send to agent") as HTMLButtonElement
+    const note = el("span", "tests-status", this.#sent.get(item.url) ?? "")
+    send.addEventListener("click", async () => {
+      send.disabled = true
+      note.textContent = "Sending…"
+      const result = await this.#actions.sendItem(pr, item)
+      this.#sent.set(
+        item.url,
+        result === "sent"
+          ? "Sent."
+          : result === "held"
+            ? "Waiting for an agent in the tab."
+            : result,
+      )
+      note.textContent = this.#sent.get(item.url) ?? ""
+      send.disabled = false
+    })
+    return el(
+      "div",
+      "pr-thread",
+      el(
+        "div",
+        "pr-thread-head",
+        el(
+          "span",
+          `pr-thread-where pr-review ${item.state ?? ""}`,
+          `${item.author} ${verdict}`,
+        ),
+        send,
+        note,
+      ),
+      ...(item.body.trim() ? [this.#frame(item.html, item.body)] : []),
+    )
+  }
+
   #threadsBox(pr: Pr): HTMLElement {
     const key = `${pr.url} threads`
     const d = el(
@@ -353,6 +454,17 @@ export class PrsView {
   /** The comment as GitHub renders it, in a frame that runs no script
    * (comment_doc.ts): other people's HTML stays out of the dashboard */
   #comment(c: ThreadComment): HTMLElement {
+    return el(
+      "div",
+      "pr-comment",
+      el("div", "pr-comment-author", c.author),
+      this.#frame(c.html, c.body),
+    )
+  }
+
+  /** GitHub's HTML for something in a sandboxed frame, or its markdown as
+   * plain text where there's no HTML */
+  #frame(html: string, body: string): HTMLIFrameElement {
     const frame = document.createElement("iframe")
     frame.className = "pr-comment-frame"
     // Same-origin only so the page can measure it; no scripts, no forms
@@ -360,13 +472,13 @@ export class PrsView {
       "sandbox",
       "allow-same-origin allow-popups allow-popups-to-escape-sandbox",
     )
-    frame.srcdoc = commentDoc(c.html || `<p>${escapeText(c.body)}</p>`, commentLook())
+    frame.srcdoc = commentDoc(html || `<p>${escapeText(body)}</p>`, commentLook())
     const fit = () => {
       const doc = frame.contentDocument
       if (doc?.documentElement) frame.style.height = `${doc.documentElement.scrollHeight}px`
     }
     frame.addEventListener("load", fit)
     new ResizeObserver(fit).observe(frame)
-    return el("div", "pr-comment", el("div", "pr-comment-author", c.author), frame)
+    return frame
   }
 }

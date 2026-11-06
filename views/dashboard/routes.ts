@@ -33,6 +33,11 @@ import { TestsWatcher } from "./tests/watcher.ts"
 import { githubRepos } from "./prs/github.ts"
 import { PR_FIELDS, PrsWatcher } from "./prs/watcher.ts"
 import { parseThreads, THREADS_QUERY, threadMessage } from "./prs/threads.ts"
+import {
+  CONVERSATION_QUERY,
+  conversationMessage,
+  parseConversation,
+} from "./prs/conversation.ts"
 import { adfToHtml, adfToText, issueGoal, parseTransitions } from "./jira/jira.ts"
 import { JiraWatcher } from "./jira/watcher.ts"
 import { ownPrDiff, planReview, reviewMessage } from "./prs/review.ts"
@@ -322,6 +327,10 @@ export class Dashboard {
       return await this.#sendThread(req)
     if (rest === "pr-review" && req.method === "POST") return await this.#reviewPr(req)
     if (rest === "pr-skepsis" && req.method === "POST") return await this.#ownPrSkepsis(req)
+    if (rest === "pr-conversation" && req.method === "POST")
+      return await this.#prConversation(req)
+    if (rest === "pr-conversation-send" && req.method === "POST")
+      return await this.#sendConversationItem(req)
     if (rest === "pr-review-agent" && req.method === "POST")
       return await this.#askReview(req)
     if (rest === "pr-review-done" && req.method === "POST")
@@ -410,7 +419,8 @@ export class Dashboard {
     return { tab, pr, thread: body.thread }
   }
 
-  async #threadsOf(root: string, repo: string, number: number) {
+  /** A GraphQL query about one PR, through gh */
+  async #prQuery(root: string, query: string, repo: string, number: number) {
     const [owner, name] = repo.split("/")
     const o = await run(
       "gh",
@@ -418,7 +428,7 @@ export class Dashboard {
         "api",
         "graphql",
         "-f",
-        `query=${THREADS_QUERY}`,
+        `query=${query}`,
         "-F",
         `owner=${owner}`,
         "-F",
@@ -429,7 +439,43 @@ export class Dashboard {
       { cwd: root },
     )
     if (!o.success) throw new Error(o.stderr.trim() || `gh exited with ${o.code}`)
-    return parseThreads(o.stdout)
+    return o.stdout
+  }
+
+  async #threadsOf(root: string, repo: string, number: number) {
+    return parseThreads(await this.#prQuery(root, THREADS_QUERY, repo, number))
+  }
+
+  /** A PR's description, comments and reviews (conversation.ts), when the
+   * page opens them */
+  async #prConversation(req: Request): Promise<Response> {
+    const { tab, pr } = await this.#listedPr(req)
+    if (!tab || !pr) return new Response("not a PR in the tab's list", { status: 404 })
+    try {
+      const json = await this.#prQuery(tab.root, CONVERSATION_QUERY, pr.repo, pr.number)
+      return Response.json(parseConversation(json))
+    } catch (e) {
+      return new Response(e instanceof Error ? e.message : String(e), { status: 502 })
+    }
+  }
+
+  /** A comment or review the user sent to the tab's agent, by its URL,
+   * fetched again so the agent gets it as it is now */
+  async #sendConversationItem(req: Request): Promise<Response> {
+    const { tab, pr, thread: url } = await this.#listedPr(req)
+    if (!tab || !pr) return new Response("not a PR in the tab's list", { status: 404 })
+    const pane = this.#paneOf(tab)
+    if (!pane) return new Response("no pane in the tab", { status: 404 })
+    let item
+    try {
+      const json = await this.#prQuery(tab.root, CONVERSATION_QUERY, pr.repo, pr.number)
+      item = parseConversation(json).items.find((i) => i.url === url)
+    } catch (e) {
+      return new Response(e instanceof Error ? e.message : String(e), { status: 502 })
+    }
+    if (!item) return new Response("no such comment on the PR", { status: 404 })
+    const status = await this.options.core.send(pane.block, conversationMessage(pr, item))
+    return Response.json({ status })
   }
 
   /** A PR's review threads, when the page opens them */

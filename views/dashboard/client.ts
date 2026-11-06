@@ -14,6 +14,7 @@ import { TerminalPane } from "../markdown/terminal_pane.ts"
 import type { TestsState } from "./tests/watcher.ts"
 import { testsBadge, TestsView } from "./tests_view.ts"
 import { prsBadge } from "./prs/github.ts"
+import type { Conversation } from "./prs/conversation.ts"
 import type { Thread } from "./prs/threads.ts"
 import type { PrsState } from "./prs/watcher.ts"
 import { PrsView } from "./prs_view.ts"
@@ -246,6 +247,27 @@ const prsView = new PrsView(prsPane, () => void prsRequest(true), {
     const res = await fetch("pr-review-agent", {
       method: "POST",
       body: JSON.stringify({ tab: state.focused, repo: pr.repo, number: pr.number }),
+    })
+    if (!res.ok) return await res.text()
+    return ((await res.json()) as { status: string }).status
+  },
+  conversation: async (pr) => {
+    const res = await fetch("pr-conversation", {
+      method: "POST",
+      body: JSON.stringify({ tab: state.focused, repo: pr.repo, number: pr.number }),
+    })
+    if (!res.ok) throw new Error(await res.text())
+    return (await res.json()) as Conversation
+  },
+  sendItem: async (pr, item) => {
+    const res = await fetch("pr-conversation-send", {
+      method: "POST",
+      body: JSON.stringify({
+        tab: state.focused,
+        repo: pr.repo,
+        number: pr.number,
+        thread: item.url,
+      }),
     })
     if (!res.ok) return await res.text()
     return ((await res.json()) as { status: string }).status
