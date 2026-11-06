@@ -41,7 +41,8 @@ import { boxCss } from "./views/dashboard/box.ts"
 import { die, portOption } from "./platform/cli.ts"
 import { scrubSessionEnv } from "./platform/session.ts"
 import { frameAncestors, gateHeaders, requestGate } from "./platform/origin.ts"
-import { themeCss } from "./views/theme.ts"
+import { lookFrom, themeCss } from "./views/theme.ts"
+import { readRexLook } from "./views/rex_theme.ts"
 import { type FileKind, fileKind, type RexState } from "./core/model.ts"
 import {
   onRexHealth,
@@ -96,7 +97,17 @@ interface ViewRoutes {
 async function serve(port: number) {
   const startedAt = Date.now()
   scrubSessionEnv(process.env)
-  const css = themeCss() + boxCss()
+  // Rex's look, read again for a page load once it's a couple of seconds
+  // old, so changing Rex's theme or font shows on the next one
+  let themed: { at: number; css: Promise<string> } | null = null
+  const themeStylesheet = () => {
+    if (!themed || Date.now() - themed.at > 2000)
+      themed = {
+        at: Date.now(),
+        css: readRexLook().then((rex) => themeCss(lookFrom(rex)) + boxCss()),
+      }
+    return themed.css
+  }
   // The stylesheet follows the OS theme, as the markdown pages do. The
   // dashboard is always dark, like the terminal, so its copy drops the light
   // theme.
@@ -209,7 +220,7 @@ async function serve(port: number) {
     if (pathname === "/github-markdown.css") return cssResponse(markdownCss)
     if (pathname === "/github-markdown-dark.css") return cssResponse(markdownDarkCss)
     if (pathname === "/chat.css") return cssResponse(chatCss)
-    if (pathname === "/theme.css") return cssResponse(css)
+    if (pathname === "/theme.css") return themeStylesheet().then(cssResponse)
     return new Response("not found", { status: 404 })
   }
 
