@@ -2,7 +2,7 @@
 // dashboard maps tabs to and the titles ah gives them
 
 import { Command, Option } from "@commander-js/extra-typings"
-import { portOption } from "../../platform/cli.ts"
+import { callServer, die, portOption, readStdin, serverUrl } from "../../platform/cli.ts"
 import { readRex } from "../../platform/rex.ts"
 import { currentAgent } from "../../platform/session.ts"
 import { emptyRegistry, loadRegistry } from "../../core/registry.ts"
@@ -16,6 +16,25 @@ export const dashboard = new Command("dashboard")
   .description("A window that follows the focused Rex tab")
   .action(function () {
     this.help()
+  })
+
+dashboard
+  .command("review-comment")
+  .summary("Take a skepsis comment into a PR's review inbox")
+  .description(
+    "skepsis's --send command when the dashboard opened it on a PR: reads skepsis's comment JSON from stdin and puts it in the PR's review inbox in the dashboard's PRs tab, to send on to GitHub or the tab's agent from there. Nothing goes to GitHub until the review is submitted.",
+  )
+  .requiredOption("--repo <owner/name>", "The PR's repo")
+  .requiredOption("--number <n>", "The PR's number", (v) => Number.parseInt(v, 10))
+  .addOption(portOption())
+  .action(async ({ repo, number, port }) => {
+    const payload =
+      (await readStdin()) ?? die("ah: expected skepsis's comment JSON on stdin")
+    const { status } = await callServer<{ status: string }>(
+      serverUrl(port, "view/dashboard/review-comment"),
+      { body: { repo, number, payload } },
+    )
+    console.log(status)
   })
 
 dashboard

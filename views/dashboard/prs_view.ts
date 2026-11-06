@@ -10,6 +10,7 @@ import type { CheckState, Pr } from "./prs/github.ts"
 import { commentDoc, type CommentLook } from "./prs/comment_doc.ts"
 import { reviewId } from "./prs/review.ts"
 import type { Conversation, ConversationItem } from "./prs/conversation.ts"
+import type { InboxComment, ReviewEvent } from "./prs/inbox.ts"
 import type { Thread, ThreadComment } from "./prs/threads.ts"
 import type { PrsState } from "./prs/watcher.ts"
 
@@ -82,6 +83,14 @@ export interface ThreadActions {
   conversation: (pr: Pr) => Promise<Conversation>
   /** Send a comment or review to the agent; "sent", "held", or an error */
   sendItem: (pr: Pr, item: ConversationItem) => Promise<string>
+  /** Act on a skepsis comment in the PR's inbox; null or the error */
+  inbox: (
+    pr: Pr,
+    id: string,
+    action: "github" | "unmark" | "agent" | "discard",
+  ) => Promise<string | null>
+  /** Post the ones marked for GitHub as a review; null or the error */
+  submit: (pr: Pr, event: ReviewEvent, text: string) => Promise<string | null>
 }
 
 type Loaded = { threads: Thread[] } | { error: string } | "loading"
@@ -107,15 +116,45 @@ export class PrsView {
   /** Review workspaces whose Done was clicked once, waiting for the yes */
   #confirming = new Set<string>()
   #last: PrsState | undefined
+  /** A redraw waiting for the user to leave a field (#editing) */
+  #held = false
+  /** "owner/name#n" -> the review's verdict and summary, kept across redraws */
+  #drafts = new Map<string, { event: ReviewEvent; text: string }>()
+  /** "owner/name#n" -> skepsis comments waiting on that PR */
+  #inbox = new Map<string, InboxComment[]>()
+  /** "owner/name#n" -> what the last inbox action or submit came to */
+  #inboxNotes = new Map<string, string>()
+
+  /** The server's latest inbox for a PR */
+  setInbox(key: string, comments: InboxComment[]) {
+    this.#inbox.set(key, comments)
+    this.render(this.#last)
+  }
 
   constructor(host: HTMLElement, onRefresh: () => void, actions: ThreadActions) {
     this.#host = host
     this.#onRefresh = onRefresh
     this.#actions = actions
+    host.addEventListener("focusout", () => {
+      // After the focus has moved, so #editing sees where it went
+      setTimeout(() => {
+        if (this.#held && !this.#editing()) this.render(this.#last)
+      })
+    })
+  }
+
+  /** Whether the user is in one of the view's fields: a redraw then would
+   * drop what they picked or typed and their focus, so it waits for them to
+   * leave it */
+  #editing(): boolean {
+    const a = document.activeElement
+    return !!a && this.#host.contains(a) && /^(SELECT|TEXTAREA|INPUT)$/.test(a.tagName)
   }
 
   render(s: PrsState | undefined) {
     this.#last = s
+    if (this.#editing()) return void (this.#held = true)
+    this.#held = false
     const scroll = this.#host.scrollTop
     const refresh = el("button", "tests-run", "Refresh") as HTMLButtonElement
     refresh.disabled = !s || s.loading
@@ -218,6 +257,8 @@ export class PrsView {
       box.append(checks)
     }
     box.append(this.#conversationBox(pr), this.#threadsBox(pr))
+    const inbox = this.#inboxBox(pr)
+    if (inbox) box.append(inbox)
     return box
   }
 
@@ -290,6 +331,93 @@ export class PrsView {
       this.render(this.#last)
     })
     return [el("span", "tests-status", "Delete its workspace and directory?"), yes, no]
+  }
+
+  /** skepsis comments on the PR, each to send to GitHub or the agent, and
+   * the bar that posts the GitHub ones as a review */
+  #inboxBox(pr: Pr): HTMLElement | null {
+    const key = `${pr.repo}#${pr.number}`
+    const comments = this.#inbox.get(key) ?? []
+    // On any PR still open, so a review can be just a verdict or a summary;
+    // a closed one only while comments from skepsis are still waiting
+    const live = pr.state === "open" || pr.state === "draft"
+    if (!live && !comments.length && !this.#inboxNotes.get(key)) return null
+    const note = el("span", "tests-status", this.#inboxNotes.get(key) ?? "")
+    const act = async (id: string, action: "github" | "unmark" | "agent" | "discard") => {
+      const error = await this.#actions.inbox(pr, id, action)
+      this.#inboxNotes.set(key, error ?? "")
+      this.render(this.#last)
+    }
+    const button = (label: string, f: () => void) => {
+      const b = el("button", "tests-run", label) as HTMLButtonElement
+      b.addEventListener("click", () => {
+        b.disabled = true
+        f()
+      })
+      return b
+    }
+    const box = el(
+      "div",
+      "pr-thread inbox",
+      el(
+        "div",
+        "tests-runner",
+        comments.length ? "Review: comments from skepsis" : "Review",
+      ),
+    )
+    for (const c of comments) {
+      const where = c.file
+        ? `${c.file}${c.lines ? `:${c.lines[0]}${c.lines[1] !== c.lines[0] ? `-${c.lines[1]}` : ""}` : ""}${c.side === "deletions" ? " (old)" : ""}`
+        : "On the whole diff"
+      const status =
+        c.to === "github" ? "for GitHub" : c.to === "agent" ? "sent to the agent" : ""
+      box.append(
+        el(
+          "div",
+          "pr-thread",
+          el(
+            "div",
+            "pr-thread-head",
+            el("span", "pr-thread-where", where),
+            el("span", "tests-status", status),
+            c.to === "github"
+              ? button("Unmark", () => void act(c.id, "unmark"))
+              : button("To GitHub", () => void act(c.id, "github")),
+            button("To agent", () => void act(c.id, "agent")),
+            button("Discard", () => void act(c.id, "discard")),
+          ),
+          el("div", "pr-comment-text", c.text),
+        ),
+      )
+    }
+    const count = comments.filter((c) => c.to === "github").length
+    const verdict = el("select", "jira-status") as HTMLSelectElement
+    for (const [value, label] of [
+      ["COMMENT", "Comment"],
+      ["APPROVE", "Approve"],
+      ["REQUEST_CHANGES", "Request changes"],
+    ]) {
+      const o = el("option", "", label) as HTMLOptionElement
+      o.value = value
+      verdict.append(o)
+    }
+    const draft = this.#drafts.get(key) ?? { event: "COMMENT" as ReviewEvent, text: "" }
+    this.#drafts.set(key, draft)
+    verdict.value = draft.event
+    verdict.addEventListener("change", () => (draft.event = verdict.value as ReviewEvent))
+    const summary = el("textarea", "inbox-summary") as HTMLTextAreaElement
+    summary.placeholder = "Summary (optional)"
+    summary.rows = 2
+    summary.value = draft.text
+    summary.addEventListener("input", () => (draft.text = summary.value))
+    const submit = button(`Submit review${count ? ` with ${count}` : ""}`, async () => {
+      const error = await this.#actions.submit(pr, draft.event, draft.text)
+      if (!error) this.#drafts.delete(key)
+      this.#inboxNotes.set(key, error ?? "Posted to GitHub.")
+      this.render(this.#last)
+    })
+    box.append(summary, el("div", "jira-actions", verdict, submit, note))
+    return box
   }
 
   #conversationBox(pr: Pr): HTMLElement {

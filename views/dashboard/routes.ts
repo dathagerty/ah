@@ -41,6 +41,15 @@ import {
 import { adfToHtml, adfToText, issueGoal, parseTransitions } from "./jira/jira.ts"
 import { JiraWatcher } from "./jira/watcher.ts"
 import { ownPrDiff, planReview, reviewMessage } from "./prs/review.ts"
+import {
+  type InboxComment,
+  parseSkepsisComment,
+  type ReviewEvent,
+  reviewRequest,
+} from "./prs/inbox.ts"
+import type { Pr } from "./prs/github.ts"
+import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
 import { bringIn, cleanUp, reviewWorkspaces } from "./prs/review_run.ts"
 import { ahStateDir } from "../../platform/paths.ts"
 import { mkdir } from "node:fs/promises"
@@ -141,6 +150,10 @@ export class Dashboard {
   #tests = new Map<string, TestsWatcher>()
   /** root -> its PRs, from the first time the page opens its PRs tab */
   #prs = new Map<string, PrsWatcher>()
+  /** "owner/name#n" -> comments from skepsis on that PR, waiting to be sent
+   * to GitHub or the agent (prs/inbox.ts) */
+  #inbox = new Map<string, InboxComment[]>()
+  #inboxIds = 0
   /** The Jira project's sprint, from the first time the page opens the
    * Issues tab */
   #jira: JiraWatcher | null = null
@@ -327,6 +340,12 @@ export class Dashboard {
       return await this.#sendThread(req)
     if (rest === "pr-review" && req.method === "POST") return await this.#reviewPr(req)
     if (rest === "pr-skepsis" && req.method === "POST") return await this.#ownPrSkepsis(req)
+    if (rest === "review-comment" && req.method === "POST")
+      return await this.#takeComment(req)
+    if (rest === "review-inbox" && req.method === "POST")
+      return await this.#inboxAction(req)
+    if (rest === "review-submit" && req.method === "POST")
+      return await this.#submitReview(req)
     if (rest === "pr-conversation" && req.method === "POST")
       return await this.#prConversation(req)
     if (rest === "pr-conversation-send" && req.method === "POST")
@@ -684,8 +703,136 @@ export class Dashboard {
       this.options.port,
       AH,
       SKEPSIS,
+      { repo: pr.repo, number: pr.number },
     )
     return await this.#runSkepsis(`pr:${pr.repo}#${pr.number}`, launch)
+  }
+
+  /** A PR some workspace's PRs tab lists, its own or one for review */
+  #anyListedPr(repo: unknown, number: unknown): Pr | undefined {
+    for (const w of this.#prs.values())
+      for (const p of [...w.state.prs, ...w.state.others])
+        if (p.repo === repo && p.number === number) return p
+    return undefined
+  }
+
+  #broadcastInbox(key: string) {
+    this.#broadcast("inbox", JSON.stringify({ key, comments: this.#inbox.get(key) ?? [] }))
+  }
+
+  /** A comment from skepsis's Send on a PR (`ah dashboard review-comment`),
+   * into the PR's inbox */
+  async #takeComment(req: Request): Promise<Response> {
+    const {
+      repo,
+      number,
+      payload,
+    }: { repo?: unknown; number?: unknown; payload?: unknown } = await req.json()
+    const pr = this.#anyListedPr(repo, number)
+    if (!pr) return new Response("not a PR the dashboard lists", { status: 404 })
+    const comment = typeof payload === "string" ? parseSkepsisComment(payload) : null
+    if (!comment) return new Response("not a skepsis comment", { status: 400 })
+    const key = `${pr.repo}#${pr.number}`
+    const comments = this.#inbox.get(key) ?? []
+    comments.push({ ...comment, id: String(++this.#inboxIds), to: null })
+    this.#inbox.set(key, comments)
+    this.#broadcastInbox(key)
+    return Response.json({ status: "in the PR's review inbox" })
+  }
+
+  /** Mark an inbox comment for GitHub (or not), send it to the tab's agent,
+   * or discard it */
+  async #inboxAction(req: Request): Promise<Response> {
+    const body: {
+      tab?: unknown
+      repo?: unknown
+      number?: unknown
+      id?: unknown
+      action?: unknown
+    } = await req.json()
+    const pr = this.#anyListedPr(body.repo, body.number)
+    const key = pr ? `${pr.repo}#${pr.number}` : ""
+    const comments = this.#inbox.get(key) ?? []
+    const comment = comments.find((c) => c.id === body.id)
+    if (!pr || !comment) return new Response("no such comment", { status: 404 })
+    let status: string | null = null
+    if (body.action === "github") comment.to = "github"
+    else if (body.action === "unmark") comment.to = null
+    else if (body.action === "discard")
+      this.#inbox.set(
+        key,
+        comments.filter((c) => c !== comment),
+      )
+    else if (body.action === "agent") {
+      const tab = this.#state.tabs.find((t) => t.id === body.tab)
+      const pane = tab && this.#paneOf(tab)
+      if (!pane) return new Response("no pane in the tab", { status: 404 })
+      status = await this.options.core.send(
+        pane.block,
+        `On ${pr.repo}#${pr.number} (${pr.title}), from my review in skepsis:\n\n${comment.prompt}`,
+      )
+      comment.to = "agent"
+    } else return new Response("not an inbox action", { status: 400 })
+    this.#broadcastInbox(key)
+    return Response.json({ status })
+  }
+
+  /** Post the comments marked for GitHub as one review on the PR, with its
+   * verdict and summary. The only thing that writes to GitHub, on the
+   * user's click. */
+  async #submitReview(req: Request): Promise<Response> {
+    const body: {
+      tab?: unknown
+      repo?: unknown
+      number?: unknown
+      event?: unknown
+      text?: unknown
+    } = await req.json()
+    const tab = this.#state.tabs.find((t) => t.id === body.tab)
+    const pr = this.#anyListedPr(body.repo, body.number)
+    if (!tab || !pr) return new Response("not a PR the dashboard lists", { status: 404 })
+    const events: ReviewEvent[] = ["COMMENT", "APPROVE", "REQUEST_CHANGES"]
+    const event = events.find((e) => e === body.event)
+    if (!event) return new Response("not a review verdict", { status: 400 })
+    const key = `${pr.repo}#${pr.number}`
+    const comments = this.#inbox.get(key) ?? []
+    const request = reviewRequest(
+      comments,
+      event,
+      typeof body.text === "string" ? body.text : "",
+    )
+    if (event !== "APPROVE" && !request.body && !request.comments.length)
+      return new Response("nothing to post: no comments for GitHub and no summary", {
+        status: 400,
+      })
+    const dir = await mkdtemp(join(tmpdir(), "ah-review-"))
+    try {
+      const file = join(dir, "review.json")
+      await writeFile(file, JSON.stringify(request))
+      const o = await run(
+        "gh",
+        [
+          "api",
+          "-X",
+          "POST",
+          `repos/${pr.repo}/pulls/${pr.number}/reviews`,
+          "--input",
+          file,
+        ],
+        { cwd: tab.root },
+      )
+      if (!o.success)
+        return new Response(o.stderr.trim() || "GitHub refused the review", { status: 502 })
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+    this.#inbox.set(
+      key,
+      comments.filter((c) => c.to !== "github"),
+    )
+    this.#broadcastInbox(key)
+    void this.#prs.get(tab.root)?.refresh()
+    return new Response(null, { status: 204 })
   }
 
   /** Someone else's PR the tab lists, and its review plan (review.ts) */
@@ -720,6 +867,7 @@ export class Dashboard {
       this.options.port,
       AH,
       SKEPSIS,
+      { repo: r.pr.repo, number: r.pr.number },
     )
     return await this.#runSkepsis(r.plan.name, launch)
   }
@@ -1018,6 +1166,8 @@ export class Dashboard {
           send(c, "tests", JSON.stringify(tests.state))
         for (const prs of this.#prs.values()) send(c, "prs", JSON.stringify(prs.state))
         if (this.#jira) send(c, "jira", JSON.stringify(this.#jira.state))
+        for (const [key, comments] of this.#inbox)
+          send(c, "inbox", JSON.stringify({ key, comments }))
         for (const [tab, doc] of this.#shown) send(c, "doc", docEvent(tab, doc))
       },
       cancel: () => {

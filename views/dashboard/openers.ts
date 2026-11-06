@@ -64,7 +64,10 @@ export function skepsisLaunch(
 }
 
 /** skepsis on the diff between two revsets, run in `cwd` (a review's
- * workspace, say), with its Send and page going through the tab's pane */
+ * workspace, say), with its page going through the tab's pane. Its Send
+ * goes to the tab's agent; for a PR, it goes to the PR's review inbox
+ * instead (prs/inbox.ts), with skepsis's whole comment, to send on from the
+ * PRs tab to GitHub or the agent. */
 export function skepsisDiffLaunch(
   from: string,
   to: string,
@@ -73,9 +76,13 @@ export function skepsisDiffLaunch(
   port: number,
   ah: string[],
   skepsis: string,
+  pr?: { repo: string; number: number },
 ): Launch {
   const [node] = ah
   const ahCmd = `${ah.map(shellQuote).join(" ")}`
+  const send = pr
+    ? `${ahCmd} dashboard review-comment --port ${port} --repo ${shellQuote(pr.repo)} --number ${pr.number}`
+    : `jq -r .prompt | ${ahCmd} message send --port ${port}`
   return {
     cmd: node,
     args: [
@@ -85,7 +92,7 @@ export function skepsisDiffLaunch(
       "--to",
       to,
       "--send",
-      `jq -r .prompt | ${ahCmd} message send --port ${port}`,
+      send,
       "--open-cmd",
       `${ahCmd} view open --port ${port} --name skepsis`,
     ],

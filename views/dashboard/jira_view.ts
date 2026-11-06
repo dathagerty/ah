@@ -51,15 +51,34 @@ export class JiraView {
   /** Ticket key -> what the last move or tracker came to */
   #notes = new Map<string, string>()
   #last: JiraState | undefined
+  /** A redraw waiting for the user to leave a field (#editing) */
+  #held = false
+  /** Ticket key -> the transition picked in its status control */
+  #picked = new Map<string, string>()
 
   constructor(host: HTMLElement, onRefresh: () => void, actions: IssueActions) {
     this.#host = host
     this.#onRefresh = onRefresh
     this.#actions = actions
+    host.addEventListener("focusout", () => {
+      setTimeout(() => {
+        if (this.#held && !this.#editing()) this.render(this.#last)
+      })
+    })
+  }
+
+  /** Whether the user is in one of the view's fields: a redraw then would
+   * drop what they picked or typed and their focus, so it waits for them to
+   * leave it */
+  #editing(): boolean {
+    const a = document.activeElement
+    return !!a && this.#host.contains(a) && /^(SELECT|TEXTAREA|INPUT)$/.test(a.tagName)
   }
 
   render(s: JiraState | undefined) {
     this.#last = s
+    if (this.#editing()) return void (this.#held = true)
+    this.#held = false
     const scroll = this.#host.scrollTop
     const refresh = el("button", "tests-run", "Refresh") as HTMLButtonElement
     refresh.disabled = !s || s.loading
@@ -138,6 +157,9 @@ export class JiraView {
       ;(option as HTMLOptionElement).value = t.id
       select.append(option)
     }
+    // What was picked survives a redraw
+    select.value = this.#picked.get(issue.key) ?? select.options[0].value
+    select.addEventListener("change", () => this.#picked.set(issue.key, select.value))
     const move = el("button", "tests-run", "Move") as HTMLButtonElement
     move.addEventListener("click", async () => {
       if (!select.value || select.selectedIndex === 0) return
@@ -146,7 +168,10 @@ export class JiraView {
       const error = await this.#actions.move(issue, select.value)
       this.#notes.set(issue.key, error ?? "Moved.")
       // Its status and transitions change; load them again when reopened
-      if (!error) this.#loaded.delete(issue.key)
+      if (!error) {
+        this.#loaded.delete(issue.key)
+        this.#picked.delete(issue.key)
+      }
       this.render(this.#last)
     })
     const track = el("button", "tests-run", "Start a tracker") as HTMLButtonElement

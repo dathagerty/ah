@@ -15,6 +15,7 @@ import type { TestsState } from "./tests/watcher.ts"
 import { testsBadge, TestsView } from "./tests_view.ts"
 import { prsBadge } from "./prs/github.ts"
 import type { Conversation } from "./prs/conversation.ts"
+import type { InboxComment } from "./prs/inbox.ts"
 import type { Thread } from "./prs/threads.ts"
 import type { PrsState } from "./prs/watcher.ts"
 import { PrsView } from "./prs_view.ts"
@@ -271,6 +272,32 @@ const prsView = new PrsView(prsPane, () => void prsRequest(true), {
     })
     if (!res.ok) return await res.text()
     return ((await res.json()) as { status: string }).status
+  },
+  inbox: async (pr, id, action) => {
+    const res = await fetch("review-inbox", {
+      method: "POST",
+      body: JSON.stringify({
+        tab: state.focused,
+        repo: pr.repo,
+        number: pr.number,
+        id,
+        action,
+      }),
+    })
+    return res.ok ? null : await res.text()
+  },
+  submit: async (pr, event, text) => {
+    const res = await fetch("review-submit", {
+      method: "POST",
+      body: JSON.stringify({
+        tab: state.focused,
+        repo: pr.repo,
+        number: pr.number,
+        event,
+        text,
+      }),
+    })
+    return res.ok ? null : await res.text()
   },
   skepsis: async (pr) => {
     const res = await fetch("pr-skepsis", {
@@ -673,6 +700,10 @@ events.addEventListener("jj", (e) => {
   const { root, html }: { root: string; html: string } = JSON.parse(e.data)
   logs.set(root, html)
   if (root === focusedRoot()) render()
+})
+events.addEventListener("inbox", (e) => {
+  const { key, comments }: { key: string; comments: InboxComment[] } = JSON.parse(e.data)
+  prsView.setInbox(key, comments)
 })
 events.addEventListener("jira", (e) => {
   jira = JSON.parse(e.data)

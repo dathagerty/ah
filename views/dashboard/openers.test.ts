@@ -131,3 +131,16 @@ test("a review's skepsis runs in its workspace on the diff it's given", () => {
   ])
   expect(launch.env).toEqual({ REX_SESSION: "session:1", REX_BLOCK: "block:b" })
 })
+
+test("a PR's skepsis sends its comments to the PR's review inbox, with the repo quoted", () => {
+  const ah = ["/usr/bin/node", "/opt/ah/ah.ts"]
+  const pane = { session: "session:1", block: "block:b" }
+  const launch = skepsisDiffLaunch("a", "b", "/ws", pane, 7420, ah, "/opt/skepsis/cli.ts", {
+    repo: "o'dd/repo",
+    number: 7,
+  })
+  const send = launch.args[launch.args.indexOf("--send") + 1]
+  expect(send).toBe(
+    "'/usr/bin/node' '/opt/ah/ah.ts' dashboard review-comment --port 7420 --repo 'o'\\''dd/repo' --number 7",
+  )
+})
