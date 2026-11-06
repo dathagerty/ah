@@ -95,3 +95,13 @@ test("a font name can't break out of its quotes", () => {
   )
   expect(block(css, "root")["--term-font"]).toMatch(/^"Evil  body  x", /)
 })
+
+test("ah's own page parts take the theme: the conversation panel, the comment popover and trackers", () => {
+  const css = themeCss(lookFrom(none))
+  // One more selector than chat.css's and task_list.css's, so it wins
+  // wherever it loads
+  expect(css).toMatch(/html #conversation \{[^}]*--chat-ink: var\(--term-fg\);/)
+  expect(css).toMatch(/html #popover \{[^}]*color: var\(--term-fg\);/)
+  expect(css).toMatch(/html:root \{[^}]*--t-page: var\(--term-bg\);/)
+  expect(css).toMatch(/html:root \{[^}]*--t-red: var\(--ansi-1\);/)
+})

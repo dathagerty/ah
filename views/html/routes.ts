@@ -66,6 +66,8 @@ export function inject(
     ...(dashboard ? [dashboardStyle] : []),
     ...(chat ? [chatStylesheet, selectionPopover] : []),
     script,
+    // Rex's theme for ah's parts of the page (views/theme.ts)
+    '<link rel="stylesheet" href="/theme.css">',
   ].join("\n")
   const end = html.search(/<\/body\s*>(?![\s\S]*<\/body\s*>)/i)
   return end < 0 ? html + "\n" + tags : html.slice(0, end) + tags + "\n" + html.slice(end)

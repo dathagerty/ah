@@ -224,6 +224,7 @@ async function serve(port: number) {
     if (rest !== undefined) return htmlBackend.handlePage(req, rest)
     if (pathname === "/chat.css") return cssResponse(chatCss)
     if (pathname === "/task_list.css") return cssResponse(taskListCss)
+    if (pathname === "/theme.css") return themeStylesheet().then(cssResponse)
     return new Response("not found", { status: 404 })
   }
   // The dashboard frames them (its gate takes those loads), and nothing else may

@@ -78,8 +78,45 @@ const paletteVars = (p: Palette) => [
   ...p.ansi.map((c, i) => `--ansi-${i}: ${c};`),
 ]
 
-/** /theme.css: the dark palette and the font in :root, and the light
- * palette over it when the OS is in light mode */
+// The parts of pages ah adds, in the theme: the conversation panel and the
+// comment popover (thread/chat.css) and trackers (html/task_list.css). Each
+// selector has one more than theirs, so it wins wherever this loads; where
+// it doesn't load, they keep their own colors.
+const mix = (pct: number) => `color-mix(in srgb, var(--term-fg) ${pct}%, var(--term-bg))`
+const PAGE_PARTS = `html #conversation {
+  --chat-page: var(--term-bg);
+  --chat-panel: ${mix(4)};
+  --chat-ink: var(--term-fg);
+  --chat-muted: ${mix(65)};
+  --chat-line: ${mix(14)};
+  --chat-blue: var(--ansi-12);
+}
+html #popover {
+  background: ${mix(4)};
+  border-color: ${mix(14)};
+  color: var(--term-fg);
+}
+html #popover textarea {
+  background: var(--term-bg);
+  color: var(--term-fg);
+}
+html:root {
+  --t-page: var(--term-bg);
+  --t-ink: var(--term-fg);
+  --t-muted: ${mix(65)};
+  --t-line: ${mix(14)};
+  --t-hover: ${mix(4)};
+  --t-blue: var(--ansi-12);
+  --t-green: var(--ansi-2);
+  --t-yellow: var(--ansi-3);
+  --t-red: var(--ansi-1);
+  /* Under white text in either mode */
+  --t-button: color-mix(in srgb, var(--ansi-2) 70%, black);
+}
+`
+
+/** /theme.css: the dark palette and the font in :root, the light palette
+ * over it when the OS is in light mode, and ah's page parts in them */
 export function themeCss(
   look: Look = lookFrom({ light: null, dark: null, font: null }),
 ): string {
@@ -93,7 +130,7 @@ export function themeCss(
     ...paletteVars(look.dark),
   ]
   const css = `:root {\n  ${root.join("\n  ")}\n}\n`
-  if (!look.light) return css
+  if (!look.light) return css + PAGE_PARTS
   const light = paletteVars(look.light).join("\n    ")
-  return `${css}@media (prefers-color-scheme: light) {\n  :root {\n    ${light}\n  }\n}\n`
+  return `${css}@media (prefers-color-scheme: light) {\n  :root {\n    ${light}\n  }\n}\n${PAGE_PARTS}`
 }

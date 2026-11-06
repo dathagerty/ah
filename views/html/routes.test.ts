@@ -24,6 +24,13 @@ test("without </body>, at the end; with chat off, only the script", () => {
   expect(out).not.toContain("color-scheme")
 })
 
+test("every page gets the theme, for ah's own parts of it", () => {
+  for (const chat of [true, false])
+    expect(inject("<p>hi</p></body>", "p-00000000", { chat })).toContain(
+      '<link rel="stylesheet" href="/theme.css">',
+    )
+})
+
 test("in the dashboard, see-through over the page's own style, in the OS's light or dark", () => {
   const out = inject("<p>hi</p>", "p-00000000", { chat: false, dashboard: true })
   expect(out).toContain("background: transparent !important")
