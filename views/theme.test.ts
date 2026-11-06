@@ -37,6 +37,8 @@ test("without Rex's look, it's the built-in dark theme and font, with no light o
   expect(root["--ansi-1"]).toBe(theme.ansi[1])
   expect(root["--term-font"]).toContain("Berkeley Mono")
   expect(root["--term-size"]).toBe(`${theme.fontSize}px`)
+  // The cell height ah used to match Berkeley Mono in Rex
+  expect(root["--term-cell-height"]).toBe("6")
   expect(css).not.toContain("prefers-color-scheme")
 })
 
@@ -81,6 +83,7 @@ test("Rex's font is the terminal font, by family, size and weight", () => {
   expect(root["--term-font"]).toMatch(/^"Atkinson Hyperlegible Mono", ui-monospace/)
   expect(root["--term-size"]).toBe("14px")
   expect(root["--term-weight"]).toBe("250")
+  expect(root["--term-cell-height"]).toBe("0")
 })
 
 test("a font name can't break out of its quotes", () => {

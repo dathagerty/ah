@@ -10,13 +10,18 @@
 import { Terminal } from "@xterm/xterm"
 import { FitAddon } from "@xterm/addon-fit"
 import { WebglAddon } from "@xterm/addon-webgl"
-import { theme } from "../theme.ts"
 import type { EditorPane } from "./editor.ts"
 import type { TerminalEditor } from "./terminal_editor.ts"
+import { terminalLook } from "./terminal_theme.ts"
 
-/** Rex's cell for 13pt Berkeley Mono with its cell height at +6% (Settings,
- * Workspace.terminalCellHeightPercent), in CSS pixels: 16×33 at 2x */
-const REX_CELL = { width: 8, height: 16.5 }
+/** The page's theme vars as xterm's options: Rex's palette for the OS's
+ * light or dark, and its font (terminal_theme.ts) */
+const pageLook = () => {
+  const style = getComputedStyle(document.documentElement)
+  return terminalLook((name) => style.getPropertyValue(name))
+}
+
+const DARK = matchMedia("(prefers-color-scheme: dark)")
 
 export class TerminalPane implements EditorPane {
   readonly #host: HTMLElement
@@ -35,6 +40,11 @@ export class TerminalPane implements EditorPane {
   #waiters: (() => void)[] = []
   /** When the editor last sent output, to tell when it's done drawing */
   #outputAt = 0
+  /** Repaints in the other palette when the OS switches light and dark,
+   * without restarting the editor */
+  readonly #restyle = () => {
+    if (this.#term) this.#term.options.theme = pageLook().theme
+  }
 
   constructor(
     host: HTMLElement,
@@ -46,6 +56,7 @@ export class TerminalPane implements EditorPane {
     this.#socketUrl = socketUrl
     this.#editor = editor
     this.#onQuit = onQuit
+    DARK.addEventListener("change", this.#restyle)
     this.#start()
   }
 
@@ -57,6 +68,7 @@ export class TerminalPane implements EditorPane {
    * the pane rather than hiding it (the dashboard's split) */
   close() {
     this.#closed = true
+    DARK.removeEventListener("change", this.#restyle)
     this.#ws?.close()
     this.#resizes?.disconnect()
     this.#term?.dispose()
@@ -99,10 +111,13 @@ export class TerminalPane implements EditorPane {
   #start() {
     const host = this.#host
     const editor = this.#editor
+    const look = pageLook()
     const term = new Terminal({
-      fontSize: theme.fontSize,
-      fontFamily: theme.fontFamily,
-      theme: { background: theme.background },
+      fontSize: look.fontSize,
+      fontFamily: look.fontFamily,
+      fontWeight: look.fontWeight,
+      lineHeight: look.lineHeight,
+      theme: look.theme,
       cursorBlink: false,
       macOptionIsMeta: true,
     })
@@ -121,7 +136,6 @@ export class TerminalPane implements EditorPane {
     } catch (err) {
       console.warn("ah: WebGL renderer unavailable, using DOM renderer", err)
     }
-    matchRexCells(term)
     fitWhole(term, fit)
     // Reachable from the devtools console for debugging rendering issues
     Object.assign(globalThis, { ahTerm: term })
@@ -239,24 +253,6 @@ export class TerminalPane implements EditorPane {
     this.#term = null
     this.#start()
   }
-}
-
-/** Space xterm's cells out to Rex's. xterm floors the font's advance to
- * whole device pixels and uses its bare height, and what those come to
- * depends on the browser (Chrome's 15×30 at 2x, WebKit's bigger), so set
- * letterSpacing (added in device pixels) and lineHeight (multiplying the
- * height) from what it measured. That's in xterm's private render service,
- * so without it the cells stay as they are. */
-function matchRexCells(term: Terminal) {
-  const char = deviceSizes(term)?.char
-  if (!char?.width || !char.height) return
-  const dpr = window.devicePixelRatio
-  term.options.letterSpacing = Math.round(REX_CELL.width * dpr) - char.width
-  // xterm floors the product, so aim half a pixel over
-  term.options.lineHeight = Math.max(
-    1,
-    (Math.round(REX_CELL.height * dpr) + 0.5) / char.height,
-  )
 }
 
 type Size = { width: number; height: number }

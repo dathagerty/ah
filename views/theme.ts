@@ -51,7 +51,7 @@ const FALLBACK_FONTS = "ui-monospace, SFMono-Regular, Menlo, monospace"
 export interface Look {
   dark: Palette
   light: Palette | null
-  font: { family: string; size: number; weight: number }
+  font: { family: string; size: number; weight: number; cellHeightPercent: number }
 }
 
 /** Rex's look, with the built-in one where Rex says nothing */
@@ -59,9 +59,13 @@ export function lookFrom(rex: RexLook): Look {
   return {
     dark: rex.dark ?? BUILT_IN,
     light: rex.light,
-    font: rex.font
-      ? { family: rex.font.family, size: rex.font.size, weight: rex.font.weight }
-      : { family: "Berkeley Mono", size: theme.fontSize, weight: 400 },
+    font: rex.font ?? {
+      family: "Berkeley Mono",
+      size: theme.fontSize,
+      weight: 400,
+      // What Berkeley Mono had in Rex
+      cellHeightPercent: 6,
+    },
   }
 }
 
@@ -85,6 +89,7 @@ export function themeCss(
     `--term-font: "${family}", ${FALLBACK_FONTS};`,
     `--term-size: ${look.font.size}px;`,
     `--term-weight: ${look.font.weight};`,
+    `--term-cell-height: ${look.font.cellHeightPercent};`,
     ...paletteVars(look.dark),
   ]
   const css = `:root {\n  ${root.join("\n  ")}\n}\n`

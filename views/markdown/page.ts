@@ -60,6 +60,7 @@ ${csp}
 <link rel="stylesheet" href="/github-markdown.css">
 <link rel="stylesheet" href="../markdown.css">
 <link rel="stylesheet" href="../xterm.css">
+<link rel="stylesheet" href="/theme.css">
 ${chat ? chatStylesheet : ""}
 <style>
   body { margin: 0; background-color: #ffffff; }
