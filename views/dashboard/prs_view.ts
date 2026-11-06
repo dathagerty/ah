@@ -8,6 +8,7 @@
 
 import type { CheckState, Pr } from "./prs/github.ts"
 import { commentDoc, type CommentLook } from "./prs/comment_doc.ts"
+import { reviewId } from "./prs/review.ts"
 import type { Thread, ThreadComment } from "./prs/threads.ts"
 import type { PrsState } from "./prs/watcher.ts"
 
@@ -62,11 +63,18 @@ function ago(at: number): string {
   return min < 1 ? "just now" : `${min} min ago`
 }
 
-/** What the view asks of the server about a PR's threads */
+/** What the view asks of the server about a PR's threads, and about
+ * reviewing someone else's */
 export interface ThreadActions {
   load: (pr: Pr) => Promise<Thread[]>
   /** Returns what became of it: "sent", "held", or an error */
   send: (pr: Pr, thread: Thread) => Promise<string>
+  /** Bring it into a workspace and open skepsis; null or the error */
+  review: (pr: Pr) => Promise<string | null>
+  /** Returns "sent", "held", or an error */
+  askAgent: (pr: Pr) => Promise<string>
+  /** Clean up a review workspace by name; null or the error */
+  done: (name: string) => Promise<string | null>
 }
 
 type Loaded = { threads: Thread[] } | { error: string } | "loading"
@@ -82,6 +90,10 @@ export class PrsView {
   #threads = new Map<string, Loaded>()
   /** Thread id -> what sending it came to */
   #sent = new Map<string, string>()
+  /** Review workspace name -> what the last action on it came to */
+  #reviewNotes = new Map<string, string>()
+  /** Review workspaces whose Done was clicked once, waiting for the yes */
+  #confirming = new Set<string>()
   #last: PrsState | undefined
 
   constructor(host: HTMLElement, onRefresh: () => void, actions: ThreadActions) {
@@ -107,6 +119,39 @@ export class PrsView {
     if (s && !s.loading && !s.prs.length && !s.error)
       body.push(el("p", "empty", "No PRs for this workspace's bookmarks."))
     for (const pr of s?.prs ?? []) body.push(this.#pr(pr))
+    if (s?.others.length) {
+      const others = el(
+        "details",
+        "tests-section",
+        el("summary", "", el("span", "tests-runner", `For review (${s.others.length})`)),
+      ) as HTMLDetailsElement
+      others.open = this.#open.get("for review") ?? true
+      others.addEventListener("toggle", () => this.#open.set("for review", others.open))
+      for (const pr of s.others) {
+        const box = this.#pr(pr)
+        box.querySelector(".pr-meta")?.prepend(`by ${pr.author} · `)
+        box.append(this.#reviewActions(pr, s))
+        others.append(box)
+      }
+      body.push(others)
+    }
+    // Workspaces whose PR has closed or merged since, still on disk
+    const listed = new Set(
+      (s?.others ?? []).map((p) => `review-${reviewId(p.repo, p.number)}`),
+    )
+    const leftover = (s?.reviews ?? []).filter((n) => !listed.has(n))
+    if (leftover.length) {
+      const box = el(
+        "div",
+        "tests-section",
+        el("div", "tests-runner", "Review workspaces left over"),
+      )
+      for (const name of leftover)
+        box.append(
+          el("div", "jira-actions", el("span", "", name), ...this.#doneButton(name)),
+        )
+      body.push(box)
+    }
     this.#host.replaceChildren(
       el("div", "tests-bar", refresh, el("span", "tests-status", status)),
       ...body,
@@ -158,6 +203,65 @@ export class PrsView {
     }
     box.append(this.#threadsBox(pr))
     return box
+  }
+
+  #reviewActions(pr: Pr, s: PrsState): HTMLElement {
+    const name = `review-${reviewId(pr.repo, pr.number)}`
+    const has = s.reviews.includes(name)
+    const note = el("span", "tests-status", this.#reviewNotes.get(name) ?? "")
+    const act = (label: string, f: () => Promise<string | null>) => {
+      const b = el("button", "tests-run", label) as HTMLButtonElement
+      b.addEventListener("click", async () => {
+        b.disabled = true
+        note.textContent = "Working…"
+        const result = await f()
+        this.#reviewNotes.set(name, result ?? "")
+        this.render(this.#last)
+      })
+      return b
+    }
+    return el(
+      "div",
+      "jira-actions",
+      act(has ? "Reopen in skepsis" : "Review in skepsis", () => this.#actions.review(pr)),
+      act("Ask the agent", async () => {
+        const r = await this.#actions.askAgent(pr)
+        return r === "sent"
+          ? "Sent to the tab's agent."
+          : r === "held"
+            ? "Waiting for an agent."
+            : r
+      }),
+      ...(has ? this.#doneButton(name) : []),
+      note,
+    )
+  }
+
+  /** Done reviewing, in two steps: it deletes the workspace's directory, and
+   * the window can't show a confirm dialog */
+  #doneButton(name: string): HTMLElement[] {
+    if (!this.#confirming.has(name)) {
+      const b = el("button", "tests-run", "Done reviewing") as HTMLButtonElement
+      b.addEventListener("click", () => {
+        this.#confirming.add(name)
+        this.render(this.#last)
+      })
+      return [b]
+    }
+    const yes = el("button", "tests-run", "Yes, delete it") as HTMLButtonElement
+    yes.addEventListener("click", async () => {
+      yes.disabled = true
+      const error = await this.#actions.done(name)
+      this.#confirming.delete(name)
+      this.#reviewNotes.set(name, error ?? "")
+      this.render(this.#last)
+    })
+    const no = el("button", "tests-run", "Cancel") as HTMLButtonElement
+    no.addEventListener("click", () => {
+      this.#confirming.delete(name)
+      this.render(this.#last)
+    })
+    return [el("span", "tests-status", "Delete its workspace and directory?"), yes, no]
   }
 
   #threadsBox(pr: Pr): HTMLElement {

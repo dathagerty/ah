@@ -35,6 +35,10 @@ import { PR_FIELDS, PrsWatcher } from "./prs/watcher.ts"
 import { parseThreads, THREADS_QUERY, threadMessage } from "./prs/threads.ts"
 import { adfToHtml, adfToText, issueGoal, parseTransitions } from "./jira/jira.ts"
 import { JiraWatcher } from "./jira/watcher.ts"
+import { planReview, reviewMessage } from "./prs/review.ts"
+import { bringIn, cleanUp, reviewWorkspaces } from "./prs/review_run.ts"
+import { ahStateDir } from "../../platform/paths.ts"
+import { mkdir } from "node:fs/promises"
 import { resolveLink } from "./links.ts"
 import { forwardGoal } from "./new_tracker.ts"
 import {
@@ -44,6 +48,7 @@ import {
   nvimFloat,
   type Pane,
   paneIn,
+  skepsisDiffLaunch,
   skepsisLaunch,
 } from "./openers.ts"
 import { run } from "../../platform/proc.ts"
@@ -315,6 +320,11 @@ export class Dashboard {
     if (rest === "pr-threads" && req.method === "POST") return await this.#prThreads(req)
     if (rest === "pr-thread-send" && req.method === "POST")
       return await this.#sendThread(req)
+    if (rest === "pr-review" && req.method === "POST") return await this.#reviewPr(req)
+    if (rest === "pr-review-agent" && req.method === "POST")
+      return await this.#askReview(req)
+    if (rest === "pr-review-done" && req.method === "POST")
+      return await this.#doneReviewing(req)
     if (rest === "jira" && req.method === "POST") return await this.#jiraRequest(req)
     if (rest === "jira-issue" && req.method === "POST") return await this.#jiraIssue(req)
     if (rest === "jira-transition" && req.method === "POST")
@@ -381,6 +391,8 @@ export class Dashboard {
       onChange: (state) => this.#broadcast("prs", JSON.stringify(state)),
     })
     this.#prs.set(root, prs)
+    // Ones left from before, to clean up
+    void reviewWorkspaces(root).then((names) => prs.setReviews(names))
     return prs
   }
 
@@ -390,11 +402,10 @@ export class Dashboard {
     const body: { tab?: unknown; repo?: unknown; number?: unknown; thread?: unknown } =
       await req.json()
     const tab = this.#state.tabs.find((t) => t.id === body.tab)
-    const pr = tab
-      ? this.#prs
-          .get(tab.root)
-          ?.state.prs.find((p) => p.repo === body.repo && p.number === body.number)
-      : undefined
+    const listed = tab ? this.#prs.get(tab.root)?.state : undefined
+    const pr = [...(listed?.prs ?? []), ...(listed?.others ?? [])].find(
+      (p) => p.repo === body.repo && p.number === body.number,
+    )
     return { tab, pr, thread: body.thread }
   }
 
@@ -597,6 +608,80 @@ export class Dashboard {
     return Response.json({ status: result.status })
   }
 
+  /** Someone else's PR the tab lists, and its review plan (review.ts) */
+  async #reviewable(req: Request) {
+    const body: { tab?: unknown; repo?: unknown; number?: unknown } = await req.json()
+    const tab = this.#state.tabs.find((t) => t.id === body.tab)
+    const watcher = tab && this.#prs.get(tab.root)
+    const pr = watcher?.state.others.find(
+      (p) => p.repo === body.repo && p.number === body.number,
+    )
+    if (!tab || !watcher || !pr) return null
+    const remotes = await run("jj", ["git", "remote", "list"], { cwd: tab.root })
+    const plan = planReview(pr, remotes.stdout, ahStateDir("reviews"))
+    return plan && { tab, watcher, pr, plan }
+  }
+
+  /** Bring the PR into a workspace of its own and open it in skepsis */
+  async #reviewPr(req: Request): Promise<Response> {
+    const r = await this.#reviewable(req)
+    if (!r) return new Response("not a PR to review in the tab's list", { status: 404 })
+    const pane = this.#paneOf(r.tab)
+    if (!pane) return new Response("no pane in the tab", { status: 404 })
+    await mkdir(ahStateDir("reviews"), { recursive: true })
+    const error = await bringIn(r.plan, r.tab.root)
+    r.watcher.setReviews(await reviewWorkspaces(r.tab.root))
+    if (error) return new Response(error, { status: 502 })
+    const launch = skepsisDiffLaunch(
+      r.plan.from,
+      r.plan.to,
+      r.plan.dir,
+      pane,
+      this.options.port,
+      AH,
+      SKEPSIS,
+    )
+    return await this.#runSkepsis(r.plan.name, launch)
+  }
+
+  /** Ask the tab's agent to review the PR, in its workspace */
+  async #askReview(req: Request): Promise<Response> {
+    const r = await this.#reviewable(req)
+    if (!r) return new Response("not a PR to review in the tab's list", { status: 404 })
+    const pane = this.#paneOf(r.tab)
+    if (!pane) return new Response("no pane in the tab", { status: 404 })
+    await mkdir(ahStateDir("reviews"), { recursive: true })
+    const error = await bringIn(r.plan, r.tab.root)
+    r.watcher.setReviews(await reviewWorkspaces(r.tab.root))
+    if (error) return new Response(error, { status: 502 })
+    const status = await this.options.core.send(pane.block, reviewMessage(r.pr, r.plan))
+    return Response.json({ status })
+  }
+
+  /** Take a review away: its skepsis, workspace, commits, bookmark and
+   * directory (review_run.ts cleanUp). By the workspace's name, so one whose
+   * PR has closed can go too. */
+  async #doneReviewing(req: Request): Promise<Response> {
+    const { tab: id, name }: { tab?: unknown; name?: unknown } = await req.json()
+    const tab = this.#state.tabs.find((t) => t.id === id)
+    if (!tab) return new Response("no such tab", { status: 404 })
+    const names = await reviewWorkspaces(tab.root)
+    if (typeof name !== "string" || !names.includes(name))
+      return new Response("not a review workspace here", { status: 404 })
+    const reviewId = name.slice("review-".length)
+    this.#stopSkepsis(name)
+    const error = await cleanUp(
+      name,
+      `ah-review/${reviewId}`,
+      `${ahStateDir("reviews")}/${reviewId}`,
+      tab.root,
+      ahStateDir("reviews"),
+    )
+    this.#prs.get(tab.root)?.setReviews(await reviewWorkspaces(tab.root))
+    if (error) return new Response(error, { status: 502 })
+    return new Response(null, { status: 204 })
+  }
+
   /** A jj operation changed the workspace's log; a push refreshes its PRs */
   async #operationLanded(root: string) {
     const prs = this.#prs.get(root)
@@ -691,26 +776,24 @@ export class Dashboard {
   /** skepsis on the change, replacing the tab's last one and its window. It
    * prints one line once it's listening, by when it has opened its page. */
   async #openSkepsis(rev: string, tab: DashTab, pane: Pane): Promise<Response> {
-    const last = this.#skepsis.get(tab.id)
-    last?.child.kill()
-    if (last?.url) closeWindows(last.url)
-    const { cmd, args, cwd, env } = skepsisLaunch(
-      rev,
-      tab.root,
-      pane,
-      this.options.port,
-      AH,
-      SKEPSIS,
-    )
+    const launch = skepsisLaunch(rev, tab.root, pane, this.options.port, AH, SKEPSIS)
+    return await this.#runSkepsis(tab.id, launch)
+  }
+
+  /** Start skepsis for `key` (a tab, or a review), replacing that key's last
+   * one and its window. It prints one line once it's listening, by when it
+   * has opened its page. */
+  async #runSkepsis(key: string, { cmd, args, cwd, env }: Launch): Promise<Response> {
+    this.#stopSkepsis(key)
     const child = spawn(cmd, args, {
       cwd,
       env: { ...process.env, ...env },
       stdio: ["ignore", "pipe", "pipe"],
     })
     const entry: { child: ChildProcess; url: string | null } = { child, url: null }
-    this.#skepsis.set(tab.id, entry)
+    this.#skepsis.set(key, entry)
     child.on("exit", () => {
-      if (this.#skepsis.get(tab.id) === entry) this.#skepsis.delete(tab.id)
+      if (this.#skepsis.get(key) === entry) this.#skepsis.delete(key)
     })
     child.stderr.on("data", (d) => process.stderr.write(`skepsis: ${d}`))
     const started = await new Promise<string | null>((resolve) => {
@@ -732,6 +815,13 @@ export class Dashboard {
     }
     console.error(`ah: ${started}`)
     return new Response(null, { status: 204 })
+  }
+
+  #stopSkepsis(key: string) {
+    const last = this.#skepsis.get(key)
+    last?.child.kill()
+    if (last?.url) closeWindows(last.url)
+    this.#skepsis.delete(key)
   }
 
   /** Where the page's split under the log connects for nvim on the file:

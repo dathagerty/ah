@@ -2,6 +2,7 @@ import { expect, test } from "vitest"
 import {
   checkState,
   githubRepos,
+  parseOthers,
   parsePrs,
   pollDelay,
   type Pr,
@@ -56,6 +57,8 @@ const pr = (over: Record<string, unknown>) => ({
   isDraft: false,
   reviewDecision: "",
   headRefName: "feature",
+  baseRefName: "main",
+  author: { login: "dathagerty" },
   headRepositoryOwner: { login: "dathagerty" },
   url: "https://github.com/david-crespo/ah/pull/1",
   updatedAt: "2026-11-06T14:00:00Z",
@@ -116,6 +119,8 @@ test("a PR's state, review and checks come through in the page's terms", () => {
     title: "A change",
     url: "https://github.com/david-crespo/ah/pull/1",
     branch: "feature",
+    base: "main",
+    author: "dathagerty",
     state: "open",
     review: "changes",
     updatedAt: "2026-11-06T14:00:00Z",
@@ -134,6 +139,8 @@ const open = (checks: Pr["checks"]): Pr => ({
   title: "t",
   url: "u",
   branch: "b",
+  base: "main",
+  author: "a",
   state: "open",
   review: null,
   updatedAt: "",
@@ -160,4 +167,26 @@ test("the PRs tab's label says what needs a look", () => {
       open([]),
     ]),
   ).toBe("✗ 2")
+})
+
+test("the open PRs that aren't from the workspace's bookmarks are for review", () => {
+  const json = JSON.stringify([
+    pr({ number: 1, headRefName: "feature" }),
+    pr({ number: 2, headRefName: "theirs", author: { login: "someone" } }),
+    pr({ number: 3, headRefName: "feature", headRepositoryOwner: { login: "stranger" } }),
+    pr({ number: 4, headRefName: "old", state: "MERGED" }),
+    pr({ number: 5, headRefName: "wip", isDraft: true }),
+  ])
+  const others = parseOthers(
+    json,
+    "david-crespo/ah",
+    new Set(["feature"]),
+    new Set(["dathagerty"]),
+  )
+  expect(others.map((p) => [p.number, p.state])).toEqual([
+    [2, "open"],
+    [3, "open"],
+    [5, "draft"],
+  ])
+  expect(others[0].author).toBe("someone")
 })

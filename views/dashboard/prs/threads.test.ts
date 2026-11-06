@@ -77,6 +77,8 @@ const pr: Pr = {
   title: "Drop token types",
   url: "https://github.com/cli/cli/pull/14804",
   branch: "drop-tokens",
+  base: "trunk",
+  author: "me",
   state: "open",
   review: "changes",
   updatedAt: "",

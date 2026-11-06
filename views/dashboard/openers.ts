@@ -59,6 +59,21 @@ export function skepsisLaunch(
   ah: string[],
   skepsis: string,
 ): Launch {
+  const from = `fork_point(coalesce(present(main), trunk()) | ${rev})`
+  return skepsisDiffLaunch(from, rev, root, pane, port, ah, skepsis)
+}
+
+/** skepsis on the diff between two revsets, run in `cwd` (a review's
+ * workspace, say), with its Send and page going through the tab's pane */
+export function skepsisDiffLaunch(
+  from: string,
+  to: string,
+  cwd: string,
+  pane: Pane,
+  port: number,
+  ah: string[],
+  skepsis: string,
+): Launch {
   const [node] = ah
   const ahCmd = `${ah.map(shellQuote).join(" ")}`
   return {
@@ -66,15 +81,15 @@ export function skepsisLaunch(
     args: [
       skepsis,
       "--from",
-      `fork_point(coalesce(present(main), trunk()) | ${rev})`,
+      from,
       "--to",
-      rev,
+      to,
       "--send",
       `jq -r .prompt | ${ahCmd} message send --port ${port}`,
       "--open-cmd",
       `${ahCmd} view open --port ${port} --name skepsis`,
     ],
-    cwd: root,
+    cwd,
     env: { REX_SESSION: pane.session, REX_BLOCK: pane.block },
   }
 }

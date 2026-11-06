@@ -4,12 +4,16 @@
 // asked, and after a jj push. A failed fetch keeps the last PRs and says
 // why, in gh's words: an auth failure is shown, not worked around.
 
-import { parsePrs, pollDelay, type Pr } from "./github.ts"
+import { parseOthers, parsePrs, pollDelay, type Pr } from "./github.ts"
 
 export interface PrsState {
   root: string
   loading: boolean
   prs: Pr[]
+  /** Others' open PRs on the same repos, for review */
+  others: Pr[]
+  /** The review workspaces the repo has (review_run.ts), by name */
+  reviews: string[]
   error: string | null
   /** When the PRs were last fetched, in ms since the epoch */
   checkedAt: number | null
@@ -43,6 +47,8 @@ export const PR_FIELDS = [
   "isDraft",
   "reviewDecision",
   "headRefName",
+  "baseRefName",
+  "author",
   "headRepositoryOwner",
   "url",
   "updatedAt",
@@ -58,7 +64,15 @@ export class PrsWatcher {
 
   constructor(root: string, deps: PrsDeps) {
     this.#deps = deps
-    this.#state = { root, loading: true, prs: [], error: null, checkedAt: null }
+    this.#state = {
+      root,
+      loading: true,
+      prs: [],
+      others: [],
+      reviews: [],
+      error: null,
+      checkedAt: null,
+    }
   }
 
   get state(): PrsState {
@@ -83,6 +97,9 @@ export class PrsWatcher {
       const wanted = new Set(branches)
       const lists = await Promise.all(repos.map((repo) => this.#deps.list(repo)))
       this.#state.prs = lists.flatMap((json, i) => parsePrs(json, repos[i], wanted, owners))
+      this.#state.others = lists.flatMap((json, i) =>
+        parseOthers(json, repos[i], wanted, owners),
+      )
       this.#state.error = null
     } catch (e) {
       this.#state.error = message(e)
@@ -93,6 +110,12 @@ export class PrsWatcher {
     this.#deps.onChange(this.#state)
     const schedule = this.#deps.schedule ?? timeout
     this.#cancel = schedule(() => void this.refresh(), pollDelay(this.#state.prs))
+  }
+
+  /** The repo's review workspaces changed: one was added or cleaned up */
+  setReviews(names: string[]) {
+    this.#state.reviews = names
+    if (!this.#closed) this.#deps.onChange(this.#state)
   }
 
   /** A jj operation landed: a push changes what the PRs show */

@@ -94,6 +94,15 @@ test("a push refreshes; other operations don't", async () => {
   expect(calls).toEqual(["dathagerty/ah", "david-crespo/ah"])
 })
 
+test("others' open PRs come along, for review", async () => {
+  const { watcher } = setup()
+  await watcher.refresh()
+  // #2 is someone else's fork's main: not ours, so it's one to review
+  expect(watcher.state.others.map((p) => [p.repo, p.number])).toEqual([
+    ["david-crespo/ah", 2],
+  ])
+})
+
 test("closing it stops the polling", async () => {
   const { watcher, timers } = setup()
   await watcher.refresh()

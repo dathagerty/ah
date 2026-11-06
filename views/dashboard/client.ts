@@ -235,6 +235,28 @@ const prsView = new PrsView(prsPane, () => void prsRequest(true), {
     if (!res.ok) return await res.text()
     return ((await res.json()) as { status: string }).status
   },
+  review: async (pr) => {
+    const res = await fetch("pr-review", {
+      method: "POST",
+      body: JSON.stringify({ tab: state.focused, repo: pr.repo, number: pr.number }),
+    })
+    return res.ok ? null : await res.text()
+  },
+  askAgent: async (pr) => {
+    const res = await fetch("pr-review-agent", {
+      method: "POST",
+      body: JSON.stringify({ tab: state.focused, repo: pr.repo, number: pr.number }),
+    })
+    if (!res.ok) return await res.text()
+    return ((await res.json()) as { status: string }).status
+  },
+  done: async (name) => {
+    const res = await fetch("pr-review-done", {
+      method: "POST",
+      body: JSON.stringify({ tab: state.focused, name }),
+    })
+    return res.ok ? null : await res.text()
+  },
 })
 
 async function prsRequest(refresh: boolean) {

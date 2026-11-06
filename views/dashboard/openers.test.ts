@@ -6,6 +6,7 @@ import {
   nvimFloat,
   paneIn,
   shellQuote,
+  skepsisDiffLaunch,
   skepsisLaunch,
 } from "./openers.ts"
 
@@ -106,4 +107,27 @@ test("a path that looks like a flag or Lisp stays a file name", () => {
   const [open] = emacsCommands('/ws/--eval (shell-command "x").ts')
   expect(open.at(-1)).toBe('/ws/--eval (shell-command "x").ts')
   expect(open).not.toContain("--eval")
+})
+
+test("a review's skepsis runs in its workspace on the diff it's given", () => {
+  const ah = ["/usr/bin/node", "/opt/ah/ah.ts"]
+  const pane = { session: "session:1", block: "block:b" }
+  const launch = skepsisDiffLaunch(
+    "fork_point(main@upstream | ah-review/x-1)",
+    "ah-review/x-1",
+    "/state/ah/reviews/x-1",
+    pane,
+    7420,
+    ah,
+    "/opt/skepsis/cli.ts",
+  )
+  expect(launch.cwd).toBe("/state/ah/reviews/x-1")
+  expect(launch.args.slice(0, 5)).toEqual([
+    "/opt/skepsis/cli.ts",
+    "--from",
+    "fork_point(main@upstream | ah-review/x-1)",
+    "--to",
+    "ah-review/x-1",
+  ])
+  expect(launch.env).toEqual({ REX_SESSION: "session:1", REX_BLOCK: "block:b" })
 })

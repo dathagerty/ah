@@ -18,6 +18,9 @@ export interface Pr {
   title: string
   url: string
   branch: string
+  /** The branch it merges into */
+  base: string
+  author: string
   state: "open" | "draft" | "merged" | "closed"
   review: "approved" | "changes" | "required" | null
   updatedAt: string
@@ -69,57 +72,76 @@ interface Listed {
   isDraft: boolean
   reviewDecision: string | null
   headRefName: string
+  baseRefName?: string
+  author?: { login: string } | null
   headRepositoryOwner: { login: string } | null
   url: string
   updatedAt: string
   statusCheckRollup: Record<string, unknown>[] | null
 }
 
-/**
- * `gh pr list --repo <repo> --json …` narrowed to PRs whose head is one of
- * `branches` in a repo owned by one of `owners` (the remotes'), so another
- * fork's branch of the same name isn't taken for ours.
- */
+function toPr(p: Listed, repo: string): Pr {
+  return {
+    repo,
+    number: p.number,
+    title: p.title,
+    url: p.url,
+    branch: p.headRefName,
+    base: p.baseRefName ?? "",
+    author: p.author?.login ?? "ghost",
+    state:
+      p.state === "MERGED"
+        ? "merged"
+        : p.state === "CLOSED"
+          ? "closed"
+          : p.isDraft
+            ? "draft"
+            : "open",
+    review: REVIEW[p.reviewDecision ?? ""] ?? null,
+    updatedAt: p.updatedAt,
+    checks: (p.statusCheckRollup ?? []).map((c) => {
+      const name =
+        c.__typename === "StatusContext"
+          ? String(c.context)
+          : c.workflowName
+            ? `${String(c.workflowName)} / ${String(c.name)}`
+            : String(c.name)
+      const url = String(
+        (c.__typename === "StatusContext" ? c.targetUrl : c.detailsUrl) ?? "",
+      )
+      return { name, state: checkState(c), url }
+    }),
+  }
+}
+
+/** Whether a listed PR is from one of the workspace's `branches`, in a repo
+ * owned by one of `owners` (the remotes'), so another fork's branch of the
+ * same name isn't taken for ours */
+const isOurs = (p: Listed, branches: Set<string>, owners: Set<string>) =>
+  branches.has(p.headRefName) && owners.has(p.headRepositoryOwner?.login ?? "")
+
+/** `gh pr list --repo <repo> --json …` narrowed to the workspace's own PRs */
 export function parsePrs(
   json: string,
   repo: string,
   branches: Set<string>,
   owners: Set<string>,
 ): Pr[] {
-  const listed = JSON.parse(json) as Listed[]
-  return listed
-    .filter(
-      (p) => branches.has(p.headRefName) && owners.has(p.headRepositoryOwner?.login ?? ""),
-    )
-    .map((p) => ({
-      repo,
-      number: p.number,
-      title: p.title,
-      url: p.url,
-      branch: p.headRefName,
-      state:
-        p.state === "MERGED"
-          ? "merged"
-          : p.state === "CLOSED"
-            ? "closed"
-            : p.isDraft
-              ? "draft"
-              : "open",
-      review: REVIEW[p.reviewDecision ?? ""] ?? null,
-      updatedAt: p.updatedAt,
-      checks: (p.statusCheckRollup ?? []).map((c) => {
-        const name =
-          c.__typename === "StatusContext"
-            ? String(c.context)
-            : c.workflowName
-              ? `${String(c.workflowName)} / ${String(c.name)}`
-              : String(c.name)
-        const url = String(
-          (c.__typename === "StatusContext" ? c.targetUrl : c.detailsUrl) ?? "",
-        )
-        return { name, state: checkState(c), url }
-      }),
-    }))
+  return (JSON.parse(json) as Listed[])
+    .filter((p) => isOurs(p, branches, owners))
+    .map((p) => toPr(p, repo))
+}
+
+/** The repo's open PRs that aren't the workspace's own: the ones to review */
+export function parseOthers(
+  json: string,
+  repo: string,
+  branches: Set<string>,
+  owners: Set<string>,
+): Pr[] {
+  return (JSON.parse(json) as Listed[])
+    .filter((p) => p.state === "OPEN" && !isOurs(p, branches, owners))
+    .map((p) => toPr(p, repo))
 }
 
 const isLive = (p: Pr) => p.state === "open" || p.state === "draft"
