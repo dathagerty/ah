@@ -286,6 +286,32 @@ const prsView = new PrsView(prsPane, () => void prsRequest(true), {
     })
     return res.ok ? null : await res.text()
   },
+  reply: async (pr, thread, text) => {
+    const res = await fetch("pr-thread-reply", {
+      method: "POST",
+      body: JSON.stringify({
+        tab: state.focused,
+        repo: pr.repo,
+        number: pr.number,
+        thread: thread.id,
+        text,
+      }),
+    })
+    return res.ok ? null : await res.text()
+  },
+  resolve: async (pr, thread, resolved) => {
+    const res = await fetch("pr-thread-resolve", {
+      method: "POST",
+      body: JSON.stringify({
+        tab: state.focused,
+        repo: pr.repo,
+        number: pr.number,
+        thread: thread.id,
+        resolved,
+      }),
+    })
+    return res.ok ? null : await res.text()
+  },
   submit: async (pr, event, text) => {
     const res = await fetch("review-submit", {
       method: "POST",

@@ -1,6 +1,14 @@
 import { expect, test } from "vitest"
 import type { Pr } from "./github.ts"
-import { parseThreads, threadMessage } from "./threads.ts"
+import {
+  parseThreads,
+  REPLY_MUTATION,
+  replyArgs,
+  RESOLVE_MUTATION,
+  resolveArgs,
+  threadMessage,
+  UNRESOLVE_MUTATION,
+} from "./threads.ts"
 
 const node = (over: Record<string, unknown>) => ({
   id: "PRRT_1",
@@ -116,4 +124,32 @@ test("an outdated thread says so, since the line may have moved", () => {
     response([node({ isOutdated: true, line: null, originalLine: 61 })]),
   )
   expect(threadMessage(pr, t)).toContain("internal/attachments/client.go:61 (outdated")
+})
+
+test("a reply goes to the thread by id, its text as a string, not a number or a flag", () => {
+  expect(replyArgs("PRRT_1", "-5 or true")).toEqual([
+    "api",
+    "graphql",
+    "-f",
+    `query=${REPLY_MUTATION}`,
+    "-f",
+    "threadId=PRRT_1",
+    "-f",
+    "body=-5 or true",
+  ])
+  expect(REPLY_MUTATION).toContain("addPullRequestReviewThreadReply")
+})
+
+test("resolving and unresolving are each their own mutation", () => {
+  expect(resolveArgs("PRRT_1", true)).toEqual([
+    "api",
+    "graphql",
+    "-f",
+    `query=${RESOLVE_MUTATION}`,
+    "-f",
+    "threadId=PRRT_1",
+  ])
+  expect(resolveArgs("PRRT_1", false)[3]).toBe(`query=${UNRESOLVE_MUTATION}`)
+  expect(RESOLVE_MUTATION).toContain("resolveReviewThread")
+  expect(UNRESOLVE_MUTATION).toContain("unresolveReviewThread")
 })

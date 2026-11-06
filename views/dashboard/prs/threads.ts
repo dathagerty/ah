@@ -96,3 +96,42 @@ export function threadMessage(pr: Pr, thread: Thread): string {
     comments,
   ].join("\n")
 }
+
+/** Replying to and resolving threads, on the user's click. Variables go
+ * with gh's -f, which passes them as strings: -F would read "true" or "-5"
+ * in a reply as a boolean or a number. */
+export const REPLY_MUTATION = `mutation($threadId: ID!, $body: String!) {
+  addPullRequestReviewThreadReply(input: { pullRequestReviewThreadId: $threadId, body: $body }) {
+    comment { url }
+  }
+}`
+
+export const RESOLVE_MUTATION = `mutation($threadId: ID!) {
+  resolveReviewThread(input: { threadId: $threadId }) { thread { isResolved } }
+}`
+
+export const UNRESOLVE_MUTATION = `mutation($threadId: ID!) {
+  unresolveReviewThread(input: { threadId: $threadId }) { thread { isResolved } }
+}`
+
+/** `gh` arguments for a reply to the thread */
+export const replyArgs = (threadId: string, body: string) => [
+  "api",
+  "graphql",
+  "-f",
+  `query=${REPLY_MUTATION}`,
+  "-f",
+  `threadId=${threadId}`,
+  "-f",
+  `body=${body}`,
+]
+
+/** `gh` arguments to resolve the thread, or unresolve it */
+export const resolveArgs = (threadId: string, resolved: boolean) => [
+  "api",
+  "graphql",
+  "-f",
+  `query=${resolved ? RESOLVE_MUTATION : UNRESOLVE_MUTATION}`,
+  "-f",
+  `threadId=${threadId}`,
+]

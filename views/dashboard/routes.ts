@@ -32,7 +32,13 @@ import { listTests, runTests } from "./tests/run.ts"
 import { TestsWatcher } from "./tests/watcher.ts"
 import { githubRepos } from "./prs/github.ts"
 import { PR_FIELDS, PrsWatcher } from "./prs/watcher.ts"
-import { parseThreads, THREADS_QUERY, threadMessage } from "./prs/threads.ts"
+import {
+  parseThreads,
+  replyArgs,
+  resolveArgs,
+  THREADS_QUERY,
+  threadMessage,
+} from "./prs/threads.ts"
 import {
   CONVERSATION_QUERY,
   conversationMessage,
@@ -342,6 +348,10 @@ export class Dashboard {
     if (rest === "pr-skepsis" && req.method === "POST") return await this.#ownPrSkepsis(req)
     if (rest === "review-comment" && req.method === "POST")
       return await this.#takeComment(req)
+    if (rest === "pr-thread-reply" && req.method === "POST")
+      return await this.#threadWrite(req, "reply")
+    if (rest === "pr-thread-resolve" && req.method === "POST")
+      return await this.#threadWrite(req, "resolve")
     if (rest === "review-inbox" && req.method === "POST")
       return await this.#inboxAction(req)
     if (rest === "review-submit" && req.method === "POST")
@@ -706,6 +716,41 @@ export class Dashboard {
       { repo: pr.repo, number: pr.number },
     )
     return await this.#runSkepsis(`pr:${pr.repo}#${pr.number}`, launch)
+  }
+
+  /** Reply to a review thread, or resolve or unresolve it, on GitHub: the
+   * user's click, on a thread the PR has */
+  async #threadWrite(req: Request, kind: "reply" | "resolve"): Promise<Response> {
+    const body: {
+      tab?: unknown
+      repo?: unknown
+      number?: unknown
+      thread?: unknown
+      text?: unknown
+      resolved?: unknown
+    } = await req.json()
+    const tab = this.#state.tabs.find((t) => t.id === body.tab)
+    const pr = this.#anyListedPr(body.repo, body.number)
+    if (!tab || !pr) return new Response("not a PR the dashboard lists", { status: 404 })
+    if (kind === "reply" && (typeof body.text !== "string" || !body.text.trim()))
+      return new Response("a reply needs text", { status: 400 })
+    if (kind === "resolve" && typeof body.resolved !== "boolean")
+      return new Response("resolved is true or false", { status: 400 })
+    try {
+      const threads = await this.#threadsOf(tab.root, pr.repo, pr.number)
+      const thread = threads.find((t) => t.id === body.thread)
+      if (!thread) return new Response("no such thread on the PR", { status: 404 })
+      const args =
+        kind === "reply"
+          ? replyArgs(thread.id, String(body.text))
+          : resolveArgs(thread.id, body.resolved === true)
+      const o = await run("gh", args, { cwd: tab.root })
+      if (!o.success)
+        return new Response(o.stderr.trim() || "GitHub refused it", { status: 502 })
+    } catch (e) {
+      return new Response(e instanceof Error ? e.message : String(e), { status: 502 })
+    }
+    return new Response(null, { status: 204 })
   }
 
   /** A PR some workspace's PRs tab lists, its own or one for review */

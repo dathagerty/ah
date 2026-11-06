@@ -89,6 +89,10 @@ export interface ThreadActions {
     id: string,
     action: "github" | "unmark" | "agent" | "discard",
   ) => Promise<string | null>
+  /** Reply to a thread on GitHub; null or the error */
+  reply: (pr: Pr, thread: Thread, text: string) => Promise<string | null>
+  /** Resolve a thread on GitHub, or unresolve it; null or the error */
+  resolve: (pr: Pr, thread: Thread, resolved: boolean) => Promise<string | null>
   /** Post the ones marked for GitHub as a review; null or the error */
   submit: (pr: Pr, event: ReviewEvent, text: string) => Promise<string | null>
 }
@@ -118,6 +122,8 @@ export class PrsView {
   #last: PrsState | undefined
   /** A redraw waiting for the user to leave a field (#editing) */
   #held = false
+  /** Thread id -> a reply being written, kept across redraws */
+  #replies = new Map<string, string>()
   /** "owner/name#n" -> the review's verdict and summary, kept across redraws */
   #drafts = new Map<string, { event: ReviewEvent; text: string }>()
   /** "owner/name#n" -> skepsis comments waiting on that PR */
@@ -571,12 +577,68 @@ export class PrsView {
       note.textContent = this.#sent.get(t.id) ?? ""
       send.disabled = false
     })
-    return el(
-      "div",
-      "pr-thread",
-      el("div", "pr-thread-head", el("span", "pr-thread-where", where), send, note),
+    const write = async (f: () => Promise<string | null>, done: string) => {
+      note.textContent = "Posting…"
+      const error = await f()
+      this.#sent.set(t.id, error ?? done)
+      if (!error) {
+        this.#replies.delete(t.id)
+        // Its comments and state changed on GitHub
+        this.#threads.delete(pr.url)
+        void this.#load(pr)
+      } else this.render(this.#last)
+    }
+    const resolve = el(
+      "button",
+      "tests-run",
+      t.resolved ? "Unresolve" : "Resolve",
+    ) as HTMLButtonElement
+    resolve.addEventListener("click", () => {
+      resolve.disabled = true
+      void write(
+        () => this.#actions.resolve(pr, t, !t.resolved),
+        t.resolved ? "Unresolved." : "Resolved.",
+      )
+    })
+    const replying = this.#replies.has(t.id)
+    const replyButton = el("button", "tests-run", "Reply") as HTMLButtonElement
+    replyButton.addEventListener("click", () => {
+      this.#replies.set(t.id, "")
+      this.render(this.#last)
+    })
+    const parts: HTMLElement[] = [
+      el(
+        "div",
+        "pr-thread-head",
+        el("span", "pr-thread-where", where),
+        send,
+        ...(replying ? [] : [replyButton]),
+        resolve,
+        note,
+      ),
       ...t.comments.map((c) => this.#comment(c)),
-    )
+    ]
+    if (replying) {
+      const box = el("textarea", "inbox-summary") as HTMLTextAreaElement
+      box.rows = 3
+      box.placeholder = "Reply on GitHub"
+      box.value = this.#replies.get(t.id) ?? ""
+      box.addEventListener("input", () => this.#replies.set(t.id, box.value))
+      const post = el("button", "tests-run", "Post reply") as HTMLButtonElement
+      post.addEventListener("click", () => {
+        const text = this.#replies.get(t.id) ?? ""
+        if (!text.trim()) return
+        post.disabled = true
+        void write(() => this.#actions.reply(pr, t, text), "Replied.")
+      })
+      const cancel = el("button", "tests-run", "Cancel") as HTMLButtonElement
+      cancel.addEventListener("click", () => {
+        this.#replies.delete(t.id)
+        this.render(this.#last)
+      })
+      parts.push(box, el("div", "jira-actions", post, cancel))
+    }
+    return el("div", "pr-thread", ...parts)
   }
 
   /** The comment as GitHub renders it, in a frame that runs no script
