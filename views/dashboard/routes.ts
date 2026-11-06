@@ -39,6 +39,7 @@ import { resolveLink } from "./links.ts"
 import { forwardGoal } from "./new_tracker.ts"
 import {
   docLaunch,
+  emacsCommands,
   type Launch,
   nvimFloat,
   type Pane,
@@ -683,6 +684,7 @@ export class Dashboard {
     if (target.open === "nvim" && target.float)
       return await this.#openNvim(target.path, tab, pane, target.line)
     if (target.open === "nvim") return await this.#nvimSplit(target.path)
+    if (target.open === "emacs") return await this.#openEmacs(target.path, target.line)
     return await this.#openSkepsis(target.rev, tab, pane)
   }
 
@@ -744,6 +746,21 @@ export class Dashboard {
       editor: `${info.url}editor`,
       doc: `${info.url}doc?in=dashboard`,
     })
+  }
+
+  /** The file in the running Emacs, brought forward (emacsCommands) */
+  async #openEmacs(path: string, line?: number): Promise<Response> {
+    const [open, focus] = emacsCommands(path, line)
+    const o = await run("emacsclient", open).catch((e: Error) => ({
+      success: false,
+      stderr: e.message,
+      code: null,
+    }))
+    if (!o.success)
+      return new Response(o.stderr.trim() || "couldn't reach Emacs", { status: 502 })
+    // It's open either way; this only brings it to the front
+    await run("emacsclient", focus).catch(() => {})
+    return new Response(null, { status: 204 })
   }
 
   /** nvim in a float over the tab, which Rex then shows: the click was to

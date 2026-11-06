@@ -49,19 +49,24 @@ export function testsBadge(s: TestsState | undefined): string {
 /** Opens a workspace file (relative to its root) at a 1-based line */
 export type OpenAt = (file: string, line: number, float: boolean) => void
 
+/** The open-with menu for a workspace file at a line, at the pointer */
+export type MenuAt = (file: string, line: number, e: MouseEvent) => void
+
 export class TestsView {
   readonly #host: HTMLElement
   readonly #onRun: () => void
   readonly #onOpen: OpenAt
+  readonly #onMenu: MenuAt
   /** The shown workspace's root, which links are relative to */
   #root = ""
   /** Node key -> whether it's open, for the nodes the user toggled */
   #open = new Map<string, boolean>()
 
-  constructor(host: HTMLElement, onRun: () => void, onOpen: OpenAt) {
+  constructor(host: HTMLElement, onRun: () => void, onOpen: OpenAt, onMenu: MenuAt) {
     this.#host = host
     this.#onRun = onRun
     this.#onOpen = onOpen
+    this.#onMenu = onMenu
   }
 
   /** A link to a line of a file in the workspace, or null for one outside it */
@@ -75,6 +80,11 @@ export class TestsView {
       e.preventDefault()
       e.stopPropagation()
       this.#onOpen(rel, line, e.altKey)
+    })
+    a.addEventListener("contextmenu", (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      this.#onMenu(rel, line, e)
     })
     return a
   }

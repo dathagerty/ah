@@ -251,6 +251,7 @@ const testsView = new TestsView(
   (file, line, float) => {
     if (state.focused) void openLink({ tab: state.focused, file, line, float })
   },
+  (file, line, e) => showOpenMenu(e, file, line),
 )
 
 async function testsRequest(run: boolean) {
@@ -307,6 +308,67 @@ for (const t of document.querySelectorAll<HTMLElement>(".log-tab"))
 // or skepsis; the server picks which (links.ts). nvim opens in the split
 // under the log, or with ⌥ in a Rex float. Not at the end of a drag that
 // selected the link's text.
+// Right-click on a file: every way to open it (links.ts `with`), now that
+// there are several. A plain click is still its default, ⌥ still the float.
+const openMenu = byId("open-menu")
+const isDoc = (file: string) => /\.(md|markdown|html?)$/i.test(file)
+
+function showOpenMenu(e: MouseEvent, file: string, line?: number) {
+  const tab = state.focused
+  if (!tab) return
+  const choices: [string, "doc" | "nvim" | "float" | "emacs"][] = [
+    ["nvim, under the log", "nvim"],
+    ["nvim, in a Rex float", "float"],
+    ["Emacs", "emacs"],
+  ]
+  if (isDoc(file)) choices.unshift(["Doc editor", "doc"])
+  openMenu.replaceChildren(
+    el("div", { className: "open-menu-file", title: file }, file.split("/").at(-1) ?? file),
+    ...choices.map(([label, pick]) =>
+      el(
+        "button",
+        {
+          onclick: () => {
+            openMenu.hidePopover()
+            void openLink({ tab, file, line, with: pick })
+          },
+        },
+        label,
+      ),
+    ),
+  )
+  openMenu.style.left = `${Math.min(e.clientX, document.documentElement.clientWidth - 220)}px`
+  openMenu.style.top = `${e.clientY}px`
+  openMenu.showPopover()
+}
+
+// A manual popover, dismissed here: the browser's light dismiss would close
+// it on the release of the right-click that opened it, since macOS fires
+// contextmenu on the press. A press outside it, Escape, a scroll, or the
+// window losing focus close it.
+const closeOpenMenu = () => {
+  if (openMenu.matches(":popover-open")) openMenu.hidePopover()
+}
+document.addEventListener(
+  "pointerdown",
+  (e) => {
+    if (!openMenu.contains(e.target as Node)) closeOpenMenu()
+  },
+  true,
+)
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeOpenMenu()
+})
+document.addEventListener("scroll", closeOpenMenu, true)
+window.addEventListener("blur", closeOpenMenu)
+
+logPane.addEventListener("contextmenu", (e) => {
+  const a = (e.target as Element).closest<HTMLElement>("a[data-file]")
+  if (!a?.dataset.file) return
+  e.preventDefault()
+  showOpenMenu(e, a.dataset.file)
+})
+
 logPane.addEventListener("click", (e) => {
   const a = (e.target as Element).closest<HTMLElement>("a[data-file], a[data-rev]")
   if (!a || !state.focused || getSelection()?.toString()) return
@@ -321,6 +383,7 @@ async function openLink(body: {
   rev?: string
   float?: boolean
   line?: number
+  with?: "doc" | "nvim" | "float" | "emacs"
 }) {
   const res = await fetch("open", { method: "POST", body: JSON.stringify(body) })
   if (!res.ok)

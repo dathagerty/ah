@@ -58,6 +58,40 @@ test("an ⌥-click opens nvim in a Rex float instead", async () => {
   })
 })
 
+test("the menu's pick says where a file opens, over its default", async () => {
+  const x = join(root, "src", "x.ts")
+  expect(await resolveLink(root, { file: "src/x.ts", with: "emacs", line: 4 })).toEqual({
+    ok: true,
+    target: { open: "emacs", path: x, line: 4 },
+  })
+  expect(await resolveLink(root, { file: "src/x.ts", with: "float" })).toEqual({
+    ok: true,
+    target: { open: "nvim", path: x, float: true },
+  })
+  expect(await resolveLink(root, { file: "src/x.ts", with: "nvim" })).toEqual({
+    ok: true,
+    target: { open: "nvim", path: x, float: false },
+  })
+  // A doc can go to nvim or Emacs too
+  expect(await resolveLink(root, { file: "notes/a.md", with: "emacs" })).toEqual({
+    ok: true,
+    target: { open: "emacs", path: join(root, "notes", "a.md") },
+  })
+})
+
+test("the doc editor is only for docs, and the pick has to be one there is", async () => {
+  for (const body of [
+    { file: "src/x.ts", with: "doc" },
+    { file: "src/x.ts", with: "vim" },
+    { file: "src/x.ts", with: 3 },
+  ])
+    expect(await resolveLink(root, body)).toMatchObject({ ok: false, status: 400 })
+  expect(await resolveLink(root, { file: "notes/a.md", with: "doc" })).toMatchObject({
+    ok: true,
+    target: { open: "doc" },
+  })
+})
+
 test("a line goes along to nvim and the doc editor", async () => {
   expect(await resolveLink(root, { file: "src/x.ts", line: 13 })).toEqual({
     ok: true,

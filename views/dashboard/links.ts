@@ -10,6 +10,8 @@ export type LinkTarget =
   | { open: "doc"; path: string; line?: number }
   /** In the dashboard's split under the log, or a Rex float for an ⌥-click */
   | { open: "nvim"; path: string; float: boolean; line?: number }
+  /** In the running Emacs, from the open-with menu */
+  | { open: "emacs"; path: string; line?: number }
   | { open: "skepsis"; rev: string }
 
 export type LinkResult =
@@ -31,9 +33,13 @@ const refuse = (status: 400 | 404, error: string): LinkResult => ({
 
 const isNotFound = (e: unknown) => (e as NodeJS.ErrnoException).code === "ENOENT"
 
+/** Where the open-with menu can send a file; `doc` only for docs */
+const WITH = new Set(["doc", "nvim", "float", "emacs"])
+
 /** `body` as the page posts it: `{ file }`, relative to the workspace root,
- * with `float` for an ⌥-click and a 1-based `line` to open at, or `{ rev }`.
- * A file must be in the workspace once symlinks are followed. */
+ * with `float` for an ⌥-click or `with` for the open-with menu's pick, and a
+ * 1-based `line` to open at; or `{ rev }`. A file must be in the workspace
+ * once symlinks are followed. */
 export async function resolveLink(root: string, body: unknown): Promise<LinkResult> {
   if (typeof body !== "object" || body === null) return refuse(400, "not a link")
   const {
@@ -41,7 +47,16 @@ export async function resolveLink(root: string, body: unknown): Promise<LinkResu
     rev,
     float = false,
     line,
-  } = body as { file?: unknown; rev?: unknown; float?: unknown; line?: unknown }
+    with: pick,
+  } = body as {
+    file?: unknown
+    rev?: unknown
+    float?: unknown
+    line?: unknown
+    with?: unknown
+  }
+  if (pick !== undefined && !(typeof pick === "string" && WITH.has(pick)))
+    return refuse(400, "not a way to open a file")
   if (typeof float !== "boolean") return refuse(400, "float is true or false")
   if (line !== undefined && !(Number.isInteger(line) && (line as number) >= 1))
     return refuse(400, "line is a whole number from 1")
@@ -70,10 +85,14 @@ export async function resolveLink(root: string, body: unknown): Promise<LinkResu
     throw e
   }
   if (!path.startsWith(realRoot + sep)) return refuse(400, "not a path in the workspace")
+  const isDoc = DOC.test(path)
+  if (pick === "doc" && !isDoc)
+    return refuse(400, "the doc editor is for markdown and html")
+  if (pick === "emacs") return { ok: true, target: { open: "emacs", path, ...at } }
+  if (pick === "nvim" || pick === "float")
+    return { ok: true, target: { open: "nvim", path, float: pick === "float", ...at } }
   return {
     ok: true,
-    target: DOC.test(path)
-      ? { open: "doc", path, ...at }
-      : { open: "nvim", path, float, ...at },
+    target: isDoc ? { open: "doc", path, ...at } : { open: "nvim", path, float, ...at },
   }
 }

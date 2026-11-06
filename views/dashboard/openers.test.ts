@@ -1,6 +1,13 @@
 import { expect, test } from "vitest"
 import type { Tab } from "../../core/model.ts"
-import { docLaunch, nvimFloat, paneIn, shellQuote, skepsisLaunch } from "./openers.ts"
+import {
+  docLaunch,
+  emacsCommands,
+  nvimFloat,
+  paneIn,
+  shellQuote,
+  skepsisLaunch,
+} from "./openers.ts"
 
 const tab = (focused: string | null, ...blocks: string[]): Tab => ({
   id: "tab:1",
@@ -85,4 +92,18 @@ test("a change opens in skepsis from main's fork point, sending back through the
 test("shellQuote keeps spaces and quotes in one word", () => {
   expect(shellQuote("/Applications/My App/node")).toBe("'/Applications/My App/node'")
   expect(shellQuote("it's")).toBe("'it'\\''s'")
+})
+
+test("Emacs opens the file in the frame there is, at the line, then comes forward", () => {
+  expect(emacsCommands("/ws/src/x.ts", 13)).toEqual([
+    ["-a", "", "-r", "-n", "+13", "/ws/src/x.ts"],
+    ["-n", "--eval", "(select-frame-set-input-focus (selected-frame))"],
+  ])
+  expect(emacsCommands("/ws/src/x.ts")[0]).toEqual(["-a", "", "-r", "-n", "/ws/src/x.ts"])
+})
+
+test("a path that looks like a flag or Lisp stays a file name", () => {
+  const [open] = emacsCommands('/ws/--eval (shell-command "x").ts')
+  expect(open.at(-1)).toBe('/ws/--eval (shell-command "x").ts')
+  expect(open).not.toContain("--eval")
 })

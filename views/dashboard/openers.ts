@@ -34,6 +34,17 @@ export function nvimFloat(path: string, root: string, line?: number) {
   return { label: basename(path), command: ["nvim", ...at, path], cwd: root }
 }
 
+/** emacsclient's two calls for a file: open it at `line` in the frame
+ * there is (-r makes one if there's none; -a '' starts Emacs if it isn't
+ * running, as the user's `ec` does), then bring that frame forward. The path
+ * is always absolute, and only ever an argument, never Lisp. */
+export function emacsCommands(path: string, line?: number): [string[], string[]] {
+  return [
+    ["-a", "", "-r", "-n", ...(line ? [`+${line}`] : []), path],
+    ["-n", "--eval", "(select-frame-set-input-focus (selected-frame))"],
+  ]
+}
+
 /** One word to a POSIX shell, whatever's in it */
 export const shellQuote = (s: string) => `'${s.replaceAll("'", `'\\''`)}'`
 
