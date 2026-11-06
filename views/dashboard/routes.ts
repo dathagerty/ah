@@ -32,6 +32,7 @@ import { listTests, runTests } from "./tests/run.ts"
 import { TestsWatcher } from "./tests/watcher.ts"
 import { githubRepos } from "./prs/github.ts"
 import { PR_FIELDS, PrsWatcher } from "./prs/watcher.ts"
+import { parseThreads, THREADS_QUERY, threadMessage } from "./prs/threads.ts"
 import { resolveLink } from "./links.ts"
 import { forwardGoal } from "./new_tracker.ts"
 import {
@@ -298,6 +299,9 @@ export class Dashboard {
     if (rest === "tests" && req.method === "POST") return await this.#testsRequest(req)
     if (rest === "new-tracker" && req.method === "POST") return await this.#newTracker(req)
     if (rest === "prs" && req.method === "POST") return await this.#prsRequest(req)
+    if (rest === "pr-threads" && req.method === "POST") return await this.#prThreads(req)
+    if (rest === "pr-thread-send" && req.method === "POST")
+      return await this.#sendThread(req)
     return new Response("not found", { status: 404 })
   }
 
@@ -359,6 +363,73 @@ export class Dashboard {
     })
     this.#prs.set(root, prs)
     return prs
+  }
+
+  /** A PR the tab's PRs tab lists, for the requests about one; the page
+   * can't name another repo's */
+  async #listedPr(req: Request) {
+    const body: { tab?: unknown; repo?: unknown; number?: unknown; thread?: unknown } =
+      await req.json()
+    const tab = this.#state.tabs.find((t) => t.id === body.tab)
+    const pr = tab
+      ? this.#prs
+          .get(tab.root)
+          ?.state.prs.find((p) => p.repo === body.repo && p.number === body.number)
+      : undefined
+    return { tab, pr, thread: body.thread }
+  }
+
+  async #threadsOf(root: string, repo: string, number: number) {
+    const [owner, name] = repo.split("/")
+    const o = await run(
+      "gh",
+      [
+        "api",
+        "graphql",
+        "-f",
+        `query=${THREADS_QUERY}`,
+        "-F",
+        `owner=${owner}`,
+        "-F",
+        `name=${name}`,
+        "-F",
+        `number=${number}`,
+      ],
+      { cwd: root },
+    )
+    if (!o.success) throw new Error(o.stderr.trim() || `gh exited with ${o.code}`)
+    return parseThreads(o.stdout)
+  }
+
+  /** A PR's review threads, when the page opens them */
+  async #prThreads(req: Request): Promise<Response> {
+    const { tab, pr } = await this.#listedPr(req)
+    if (!tab || !pr) return new Response("not a PR in the tab's list", { status: 404 })
+    try {
+      return Response.json({ threads: await this.#threadsOf(tab.root, pr.repo, pr.number) })
+    } catch (e) {
+      return new Response(e instanceof Error ? e.message : String(e), { status: 502 })
+    }
+  }
+
+  /** A thread the user sent to the tab's agent (threads.ts), fetched again
+   * so the agent gets it as it is now */
+  async #sendThread(req: Request): Promise<Response> {
+    const { tab, pr, thread: id } = await this.#listedPr(req)
+    if (!tab || !pr) return new Response("not a PR in the tab's list", { status: 404 })
+    const pane = this.#paneOf(tab)
+    if (!pane) return new Response("no pane in the tab", { status: 404 })
+    let thread
+    try {
+      thread = (await this.#threadsOf(tab.root, pr.repo, pr.number)).find(
+        (t) => t.id === id,
+      )
+    } catch (e) {
+      return new Response(e instanceof Error ? e.message : String(e), { status: 502 })
+    }
+    if (!thread) return new Response("no such thread on the PR", { status: 404 })
+    const status = await this.options.core.send(pane.block, threadMessage(pr, thread))
+    return Response.json({ status })
   }
 
   /** A jj operation changed the workspace's log; a push refreshes its PRs */

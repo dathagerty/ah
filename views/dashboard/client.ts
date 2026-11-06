@@ -14,6 +14,7 @@ import { TerminalPane } from "../markdown/terminal_pane.ts"
 import type { TestsState } from "./tests/watcher.ts"
 import { testsBadge, TestsView } from "./tests_view.ts"
 import { prsBadge } from "./prs/github.ts"
+import type { Thread } from "./prs/threads.ts"
 import type { PrsState } from "./prs/watcher.ts"
 import { PrsView } from "./prs_view.ts"
 
@@ -179,7 +180,29 @@ async function sendGoal() {
 let logTab: "jj" | "tests" | "prs" = "jj"
 const prs = new Map<string, PrsState>() // root -> its PRs
 const prsAsked = new Set<string>() // roots the server was asked to fetch for
-const prsView = new PrsView(prsPane, () => void prsRequest(true))
+const prsView = new PrsView(prsPane, () => void prsRequest(true), {
+  load: async (pr) => {
+    const res = await fetch("pr-threads", {
+      method: "POST",
+      body: JSON.stringify({ tab: state.focused, repo: pr.repo, number: pr.number }),
+    })
+    if (!res.ok) throw new Error(await res.text())
+    return ((await res.json()) as { threads: Thread[] }).threads
+  },
+  send: async (pr, thread) => {
+    const res = await fetch("pr-thread-send", {
+      method: "POST",
+      body: JSON.stringify({
+        tab: state.focused,
+        repo: pr.repo,
+        number: pr.number,
+        thread: thread.id,
+      }),
+    })
+    if (!res.ok) return await res.text()
+    return ((await res.json()) as { status: string }).status
+  },
+})
 
 async function prsRequest(refresh: boolean) {
   const tab = state.focused
