@@ -75,6 +75,8 @@ export interface ThreadActions {
   askAgent: (pr: Pr) => Promise<string>
   /** Clean up a review workspace by name; null or the error */
   done: (name: string) => Promise<string | null>
+  /** Your own PR in skepsis, from its base; null or the error */
+  skepsis: (pr: Pr) => Promise<string | null>
 }
 
 type Loaded = { threads: Thread[] } | { error: string } | "loading"
@@ -118,7 +120,11 @@ export class PrsView {
     if (s?.error) body.push(el("pre", "tests-error", s.error))
     if (s && !s.loading && !s.prs.length && !s.error)
       body.push(el("p", "empty", "No PRs for this workspace's bookmarks."))
-    for (const pr of s?.prs ?? []) body.push(this.#pr(pr))
+    for (const pr of s?.prs ?? []) {
+      const box = this.#pr(pr)
+      box.append(this.#ownActions(pr))
+      body.push(box)
+    }
     if (s?.others.length) {
       const others = el(
         "details",
@@ -203,6 +209,18 @@ export class PrsView {
     }
     box.append(this.#threadsBox(pr))
     return box
+  }
+
+  #ownActions(pr: Pr): HTMLElement {
+    const note = el("span", "tests-status", this.#reviewNotes.get(pr.url) ?? "")
+    const open = el("button", "tests-run", "Open in skepsis") as HTMLButtonElement
+    open.addEventListener("click", async () => {
+      open.disabled = true
+      note.textContent = "Opening…"
+      this.#reviewNotes.set(pr.url, (await this.#actions.skepsis(pr)) ?? "")
+      this.render(this.#last)
+    })
+    return el("div", "jira-actions", open, note)
   }
 
   #reviewActions(pr: Pr, s: PrsState): HTMLElement {

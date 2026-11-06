@@ -35,7 +35,7 @@ import { PR_FIELDS, PrsWatcher } from "./prs/watcher.ts"
 import { parseThreads, THREADS_QUERY, threadMessage } from "./prs/threads.ts"
 import { adfToHtml, adfToText, issueGoal, parseTransitions } from "./jira/jira.ts"
 import { JiraWatcher } from "./jira/watcher.ts"
-import { planReview, reviewMessage } from "./prs/review.ts"
+import { ownPrDiff, planReview, reviewMessage } from "./prs/review.ts"
 import { bringIn, cleanUp, reviewWorkspaces } from "./prs/review_run.ts"
 import { ahStateDir } from "../../platform/paths.ts"
 import { mkdir } from "node:fs/promises"
@@ -321,6 +321,7 @@ export class Dashboard {
     if (rest === "pr-thread-send" && req.method === "POST")
       return await this.#sendThread(req)
     if (rest === "pr-review" && req.method === "POST") return await this.#reviewPr(req)
+    if (rest === "pr-skepsis" && req.method === "POST") return await this.#ownPrSkepsis(req)
     if (rest === "pr-review-agent" && req.method === "POST")
       return await this.#askReview(req)
     if (rest === "pr-review-done" && req.method === "POST")
@@ -606,6 +607,39 @@ export class Dashboard {
     )
     if (!result.ok) return new Response(result.error, { status: result.status })
     return Response.json({ status: result.status })
+  }
+
+  /** One of the workspace's own PRs in skepsis, on its diff from its base
+   * (ownPrDiff), which is fetched first so the diff is against where it is
+   * now */
+  async #ownPrSkepsis(req: Request): Promise<Response> {
+    const { tab, pr } = await this.#listedPr(req)
+    if (!tab || !pr || !this.#prs.get(tab.root)?.state.prs.includes(pr))
+      return new Response("not one of the tab's own PRs", { status: 404 })
+    const pane = this.#paneOf(tab)
+    if (!pane) return new Response("no pane in the tab", { status: 404 })
+    const remotes = await run("jj", ["git", "remote", "list"], { cwd: tab.root })
+    const diff = ownPrDiff(pr, remotes.stdout)
+    if (!diff) return new Response(`no remote for ${pr.repo}`, { status: 404 })
+    const fetched = await run(
+      "jj",
+      ["git", "fetch", "--remote", diff.remote, "--branch", `exact:${diff.base}`],
+      { cwd: tab.root },
+    )
+    if (!fetched.success)
+      return new Response(fetched.stderr.trim() || "couldn't fetch the base", {
+        status: 502,
+      })
+    const launch = skepsisDiffLaunch(
+      diff.from,
+      diff.to,
+      tab.root,
+      pane,
+      this.options.port,
+      AH,
+      SKEPSIS,
+    )
+    return await this.#runSkepsis(`pr:${pr.repo}#${pr.number}`, launch)
   }
 
   /** Someone else's PR the tab lists, and its review plan (review.ts) */

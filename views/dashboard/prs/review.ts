@@ -120,3 +120,20 @@ export function reviewMessage(pr: Pr, plan: ReviewPlan): string {
     "Tell me what you find: bugs, risks, and anything unclear. Don't push or comment on GitHub; I'll decide what to post.",
   ].join("\n")
 }
+
+/** A name as a revset string literal: in double quotes, with the quote and
+ * backslash escaped, so no name can end it */
+const literal = (s: string) => `"${s.replace(/[\\"]/g, (c) => `\\${c}`)}"`
+
+/** The diff for your own PR, in your workspace: from where your bookmark
+ * left the PR's base on the PR's repo's remote, to the bookmark */
+export function ownPrDiff(
+  pr: Pr,
+  remoteList: string,
+): { remote: string; base: string; from: string; to: string } | null {
+  const remote = remoteFor(pr.repo, remoteList)
+  if (!remote) return null
+  const head = `bookmarks(exact:${literal(pr.branch)})`
+  const base = `remote_bookmarks(exact:${literal(pr.base)}, exact:${literal(remote)})`
+  return { remote, base: pr.base, from: `fork_point(${base} | ${head})`, to: head }
+}

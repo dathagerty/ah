@@ -250,6 +250,13 @@ const prsView = new PrsView(prsPane, () => void prsRequest(true), {
     if (!res.ok) return await res.text()
     return ((await res.json()) as { status: string }).status
   },
+  skepsis: async (pr) => {
+    const res = await fetch("pr-skepsis", {
+      method: "POST",
+      body: JSON.stringify({ tab: state.focused, repo: pr.repo, number: pr.number }),
+    })
+    return res.ok ? null : await res.text()
+  },
   done: async (name) => {
     const res = await fetch("pr-review-done", {
       method: "POST",

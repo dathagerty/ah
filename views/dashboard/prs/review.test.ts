@@ -6,6 +6,7 @@ import {
   isReviewDir,
   planReview,
   remoteFor,
+  ownPrDiff,
   reviewMessage,
 } from "./review.ts"
 
@@ -129,4 +130,26 @@ test("the agent's review request says what to look at and what not to do", () =>
     "jj diff --from 'fork_point(main@upstream | ah-review/david-crespo-ah-42)'",
   )
   expect(m).toMatch(/don't push|do not push/i)
+})
+
+const mine: Pr = {
+  ...pr,
+  repo: "david-crespo/ah",
+  branch: "dathagerty/push-abc",
+  base: "main",
+}
+
+test("your own PR's diff is from its base on the PR's repo to your bookmark", () => {
+  expect(ownPrDiff(mine, REMOTES)).toEqual({
+    remote: "upstream",
+    base: "main",
+    from: 'fork_point(remote_bookmarks(exact:"main", exact:"upstream") | bookmarks(exact:"dathagerty/push-abc"))',
+    to: 'bookmarks(exact:"dathagerty/push-abc")',
+  })
+  expect(ownPrDiff({ ...mine, repo: "elsewhere/x" }, REMOTES)).toBeNull()
+})
+
+test("a branch name can't break out of its quotes in the revset", () => {
+  const d = ownPrDiff({ ...mine, branch: 'evil") | all() | ("' }, REMOTES)
+  expect(d?.to).toBe('bookmarks(exact:"evil\\") | all() | (\\"")')
 })
