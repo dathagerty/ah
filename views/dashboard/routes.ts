@@ -30,6 +30,8 @@ import { LogWatcher, SnapshotWatcher } from "./jj.ts"
 import { detectRunners } from "./tests/detect.ts"
 import { listTests, runTests } from "./tests/run.ts"
 import { TestsWatcher } from "./tests/watcher.ts"
+import { githubRepos } from "./prs/github.ts"
+import { PR_FIELDS, PrsWatcher } from "./prs/watcher.ts"
 import { resolveLink } from "./links.ts"
 import { forwardGoal } from "./new_tracker.ts"
 import {
@@ -118,6 +120,8 @@ export class Dashboard {
   #snapshotter: SnapshotWatcher | null = null
   /** root -> its tests, from the first time the page opens its Tests tab */
   #tests = new Map<string, TestsWatcher>()
+  /** root -> its PRs, from the first time the page opens its PRs tab */
+  #prs = new Map<string, PrsWatcher>()
   /** Whether cargo-nextest is installed, asked once */
   #nextest: Promise<boolean> | null = null
   #clients = new Set<Client>()
@@ -251,11 +255,19 @@ export class Dashboard {
       tests.close()
       this.#tests.delete(root)
     }
+    for (const [root, prs] of this.#prs) {
+      if (open.has(root)) continue
+      prs.close()
+      this.#prs.delete(root)
+    }
     for (const root of open) {
       if (this.#logs.has(root)) continue
       this.#logs.set(
         root,
-        new LogWatcher(root, (html) => this.#broadcast("jj", logEvent(root, html))),
+        new LogWatcher(root, (html) => {
+          this.#broadcast("jj", logEvent(root, html))
+          void this.#operationLanded(root)
+        }),
       )
     }
     // Only the focused workspace gets snapshotted: it's the one on screen, and
@@ -285,7 +297,80 @@ export class Dashboard {
     if (rest === "open" && req.method === "POST") return await this.#openLink(req)
     if (rest === "tests" && req.method === "POST") return await this.#testsRequest(req)
     if (rest === "new-tracker" && req.method === "POST") return await this.#newTracker(req)
+    if (rest === "prs" && req.method === "POST") return await this.#prsRequest(req)
     return new Response("not found", { status: 404 })
+  }
+
+  /** The page opened a tab's PRs tab, which starts fetching its
+   * workspace's PRs, or clicked Refresh */
+  async #prsRequest(req: Request): Promise<Response> {
+    const { tab: id, refresh }: { tab?: unknown; refresh?: unknown } = await req.json()
+    const tab = this.#state.tabs.find((t) => t.id === id)
+    if (!tab) return new Response("no such tab", { status: 404 })
+    const known = this.#prs.has(tab.root)
+    const prs = this.#prsFor(tab.root)
+    if (!known || refresh === true) void prs.refresh()
+    return new Response(null, { status: 204 })
+  }
+
+  #prsFor(root: string): PrsWatcher {
+    let prs = this.#prs.get(root)
+    if (prs) return prs
+    const jj = (args: string[]) =>
+      run("jj", ["--ignore-working-copy", ...args], { cwd: root })
+    prs = new PrsWatcher(root, {
+      repos: async () => githubRepos((await jj(["git", "remote", "list"])).stdout),
+      // Bookmarks on commits not yet in an immutable one: the work a PR
+      // could be open for
+      branches: async () =>
+        (
+          await jj([
+            "bookmark",
+            "list",
+            "-r",
+            "mutable()",
+            "-T",
+            'if(!remote, name ++ "\n")',
+          ])
+        ).stdout
+          .split("\n")
+          .filter(Boolean),
+      list: async (repo) => {
+        const o = await run(
+          "gh",
+          [
+            "pr",
+            "list",
+            "--repo",
+            repo,
+            "--state",
+            "all",
+            "--limit",
+            "50",
+            "--json",
+            PR_FIELDS,
+          ],
+          { cwd: root },
+        )
+        if (!o.success) throw new Error(o.stderr.trim() || `gh exited with ${o.code}`)
+        return o.stdout
+      },
+      onChange: (state) => this.#broadcast("prs", JSON.stringify(state)),
+    })
+    this.#prs.set(root, prs)
+    return prs
+  }
+
+  /** A jj operation changed the workspace's log; a push refreshes its PRs */
+  async #operationLanded(root: string) {
+    const prs = this.#prs.get(root)
+    if (!prs) return
+    const { stdout } = await run(
+      "jj",
+      ["--ignore-working-copy", "op", "log", "-n", "1", "--no-graph", "-T", "description"],
+      { cwd: root },
+    ).catch(() => ({ stdout: "" }))
+    await prs.onOperation(stdout)
   }
 
   /** A pane in the tab to act as, for what the server does on its behalf */
@@ -509,6 +594,7 @@ export class Dashboard {
         for (const json of this.#trackers.values()) send(c, "trackers", json)
         for (const tests of this.#tests.values())
           send(c, "tests", JSON.stringify(tests.state))
+        for (const prs of this.#prs.values()) send(c, "prs", JSON.stringify(prs.state))
         for (const [tab, doc] of this.#shown) send(c, "doc", docEvent(tab, doc))
       },
       cancel: () => {

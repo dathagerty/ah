@@ -13,6 +13,9 @@ import { neovim } from "../markdown/neovim.ts"
 import { TerminalPane } from "../markdown/terminal_pane.ts"
 import type { TestsState } from "./tests/watcher.ts"
 import { testsBadge, TestsView } from "./tests_view.ts"
+import { prsBadge } from "./prs/github.ts"
+import type { PrsState } from "./prs/watcher.ts"
+import { PrsView } from "./prs_view.ts"
 
 const byId = (id: string) => document.getElementById(id)!
 const strip = byId("strip")
@@ -26,6 +29,8 @@ const nvimPane = byId("nvim-pane")
 const nvimName = byId("nvim-name")
 const testsPane = byId("tests-pane")
 const testsBadgeEl = byId("tests-badge")
+const prsPane = byId("prs-pane")
+const prsBadgeEl = byId("prs-badge")
 const newTracker = byId("new-tracker") as HTMLButtonElement
 const newTrackerForm = byId("new-tracker-form")
 const newTrackerFor = byId("new-tracker-for")
@@ -171,7 +176,17 @@ async function sendGoal() {
 
 // The log pane's tabs: the jj log, or the workspace's tests (tests_view.ts),
 // which the server starts listing the first time the tab is shown for it
-let logTab: "jj" | "tests" = "jj"
+let logTab: "jj" | "tests" | "prs" = "jj"
+const prs = new Map<string, PrsState>() // root -> its PRs
+const prsAsked = new Set<string>() // roots the server was asked to fetch for
+const prsView = new PrsView(prsPane, () => void prsRequest(true))
+
+async function prsRequest(refresh: boolean) {
+  const tab = state.focused
+  if (!tab) return
+  const res = await fetch("prs", { method: "POST", body: JSON.stringify({ tab, refresh }) })
+  if (!res.ok) console.error("ah: PRs request failed:", res.status, await res.text())
+}
 const tests = new Map<string, TestsState>() // root -> its tests
 const testsAsked = new Set<string>() // roots the server was asked to list
 const testsView = new TestsView(
@@ -194,8 +209,19 @@ function renderLogTabs() {
     t.classList.toggle("current", t.dataset.tab === logTab)
   logPane.hidden = logTab !== "jj"
   testsPane.hidden = logTab !== "tests"
+  prsPane.hidden = logTab !== "prs"
   const root = focusedRoot()
   testsBadgeEl.textContent = testsBadge(root ? tests.get(root) : undefined)
+  const shownPrs = root ? prs.get(root) : undefined
+  prsBadgeEl.textContent = shownPrs ? prsBadge(shownPrs.prs) : ""
+  if (logTab === "prs" && root) {
+    if (!prsAsked.has(root)) {
+      prsAsked.add(root)
+      void prsRequest(false)
+    }
+    prsView.render(shownPrs)
+    return
+  }
   if (logTab !== "tests" || !root) return
   if (!testsAsked.has(root)) {
     testsAsked.add(root)
@@ -206,7 +232,8 @@ function renderLogTabs() {
 
 for (const t of document.querySelectorAll<HTMLElement>(".log-tab"))
   t.addEventListener("click", () => {
-    logTab = t.dataset.tab === "tests" ? "tests" : "jj"
+    const name = t.dataset.tab
+    logTab = name === "tests" || name === "prs" ? name : "jj"
     renderLogTabs()
   })
 
@@ -466,6 +493,12 @@ events.addEventListener("jj", (e) => {
   const { root, html }: { root: string; html: string } = JSON.parse(e.data)
   logs.set(root, html)
   if (root === focusedRoot()) render()
+})
+events.addEventListener("prs", (e) => {
+  const s: PrsState = JSON.parse(e.data)
+  prs.set(s.root, s)
+  prsAsked.add(s.root)
+  if (s.root === focusedRoot()) renderLogTabs()
 })
 events.addEventListener("tests", (e) => {
   const s: TestsState = JSON.parse(e.data)
