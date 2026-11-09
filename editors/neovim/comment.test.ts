@@ -368,3 +368,43 @@ describe.skipIf(!hasNvim).concurrent("picking the agent", () => {
     })
   })
 })
+
+describe.skipIf(!hasNvim).concurrent("the selection a comment sends", () => {
+  /** Lua that comments on line 1, selected whole, and returns the
+   * --selection ah got */
+  const SELECTION = `
+    vim.cmd.edit(file)
+    keys("V ac")
+    wait_for(function() return read(vim.env.AH_FAKE_OUT) end, 2000)
+    local sent = read(vim.env.AH_FAKE_OUT)
+    local args = sent and vim.json.decode(sent).args or {}
+    for _, arg in ipairs(args) do
+      if vim.startswith(arg, "--selection=") then return { selection = arg:sub(#"--selection=" + 1) } end
+    end
+    return { selection = vim.NIL }
+  `
+
+  test("is cut to 4000 characters, as Helix cuts it, to stay under the argument size limit", async () => {
+    const result = await inNvim({
+      file: `${"a".repeat(5000)}\n`,
+      lua: `${setup("fix this")} ${SELECTION}`,
+    })
+    expect(result).toEqual({ selection: "a".repeat(4000) })
+  })
+
+  test("is cut between characters, not inside one", async () => {
+    const result = await inNvim({
+      file: `${"é".repeat(5000)}\n`,
+      lua: `${setup("fix this")} ${SELECTION}`,
+    })
+    expect(result).toEqual({ selection: "é".repeat(4000) })
+  })
+
+  test("under 4000 characters, goes whole", async () => {
+    const result = await inNvim({
+      file: `${"a".repeat(4000)}\n`,
+      lua: `${setup("fix this")} ${SELECTION}`,
+    })
+    expect(result).toEqual({ selection: "a".repeat(4000) })
+  })
+})
