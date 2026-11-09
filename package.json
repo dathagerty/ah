@@ -29,7 +29,8 @@
     "ci": "npm run tsc && npm run lint && npm run fmt:check && npm test"
   },
   "dependencies": {
-    "@lydell/node-pty": "^1.2.0-beta.15"
+    "@lydell/node-pty": "^1.2.0-beta.15",
+    "neovim": "^5.5.0"
   },
   "devDependencies": {
     "@asciidoctor/core": "^4.2.1",
