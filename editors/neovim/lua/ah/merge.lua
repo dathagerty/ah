@@ -110,16 +110,25 @@ local function check()
   if vim.fn.getcmdwintype() == "" then vim.cmd("silent! checktime") end
 end
 
+-- Merge what's on disk into the current buffer, then save it if it has
+-- unsaved text. False when a failed merge keeps it from saving, so the file
+-- on disk isn't the buffer's text.
+--
 -- update! rather than update: the check just before has merged whatever is
 -- on disk, and a file the agent writes in between mustn't leave a save
 -- stuck at a prompt
-local function save()
+-- TODO(david): document save(), which comment.lua uses before sending
+function M.save()
   check()
   local buf = vim.api.nvim_get_current_buf()
-  if vim.bo.modified and vim.bo.buftype == "" and vim.api.nvim_buf_get_name(0) ~= "" and not unmerged[buf] then
+  if unmerged[buf] then return false end
+  if vim.bo.modified and vim.bo.buftype == "" and vim.api.nvim_buf_get_name(0) ~= "" then
     vim.cmd("silent! update!")
   end
+  return true
 end
+
+local function save() M.save() end
 
 function M.setup(group, opts)
   cmd = opts.cmd

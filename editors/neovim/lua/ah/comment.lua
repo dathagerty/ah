@@ -30,10 +30,19 @@ function M.send(file, text, lines, selection)
   if not ok then vim.notify("ah: couldn't run ah: " .. tostring(err), vim.log.levels.ERROR) end
 end
 
+-- Saves before asking, so the agent reads the lines the comment is on, and
+-- refuses when the file on disk didn't merge and so may not have them
 local function prompt(lines, selection)
   local file = vim.api.nvim_buf_get_name(0)
   if file == "" or vim.bo.buftype ~= "" then
     vim.notify("ah: this buffer isn't a file", vim.log.levels.ERROR)
+    return
+  end
+  if not require("ah.merge").save() then
+    vim.notify(
+      "ah: not sending: the file on disk didn't merge, so the agent may not see these lines. Try again once it merges.",
+      vim.log.levels.ERROR
+    )
     return
   end
   vim.ui.input({ prompt = "Comment: " }, function(text)
