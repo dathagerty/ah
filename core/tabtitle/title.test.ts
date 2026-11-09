@@ -35,6 +35,7 @@ function registry(
     picks: new Map(),
     outbox: new Map(),
     held: new Set(),
+    editors: new Map(),
   }
 }
 

@@ -13,6 +13,7 @@ function M.setup(opts)
   local group = vim.api.nvim_create_augroup("ah", { clear = true })
   require("ah.merge").setup(group, { cmd = cmd, pane = (vim.env.AH_PANE or "") ~= "" })
   require("ah.comment").setup({ cmd = cmd })
+  require("ah.editor").setup(group, { cmd = cmd })
 end
 
 return M

@@ -15,6 +15,8 @@
 //     JSON on stdin (hook_event_name, session_id, cwd, prompt,
 //     transcript_path; Codex sends the same keys)
 //   .zshrc, at startup and on chpwd:         ah hook shell <label>
+//   ah's nvim plugin, on VimEnter and VimLeavePre:
+//                                            ah hook editor <start|end> --server <socket>
 //
 // The block is REX_BLOCK, which Rex sets in every shell and so every
 // agent run from it. A session's label is its block's shell label, which
@@ -22,7 +24,7 @@
 // Except for Codex hooks run by its shared daemon, whose env belongs to
 // another shell: the server finds those sessions' blocks (tuis.ts).
 
-import { Command, Option } from "@commander-js/extra-typings"
+import { Argument, Command, Option } from "@commander-js/extra-typings"
 import { homedir } from "node:os"
 import { portOption } from "../platform/cli.ts"
 import { isOneOf, str } from "../platform/guards.ts"
@@ -30,7 +32,12 @@ import { ensureServer } from "../platform/server.ts"
 import { currentAgent, currentAddress } from "../platform/session.ts"
 import { underCodexDaemon } from "./tuis.ts"
 import { type Address, HARNESSES, type Harness } from "./model.ts"
-import { HOOK_EVENTS, type RegistryEvent } from "./registry.ts"
+import {
+  EDITOR_EVENTS,
+  type EditorEventName,
+  HOOK_EVENTS,
+  type RegistryEvent,
+} from "./registry.ts"
 import { sanitizeTitle } from "./summary.ts"
 
 /** The block a process was started in, from its env */
@@ -119,6 +126,16 @@ export function hookEvent(
   }
 }
 
+// TODO(david): document editorEvent(event, socket, env)
+export function editorEvent(
+  event: EditorEventName,
+  socket: string,
+  env = process.env,
+): RegistryEvent | null {
+  const block = envBlock(env)
+  return block && socket ? { kind: "editor", event, block, socket } : null
+}
+
 const agent = new Command("agent")
   .summary("Report an agent hook event to ah")
   .description("Report an agent hook event to ah. Reads the hook's JSON from stdin.")
@@ -159,7 +176,21 @@ const shell = new Command("shell")
     if (block && clean) await send(port, { kind: "shell", block, label: clean })
   })
 
+const editor = new Command("editor")
+  .summary("Report an nvim starting or ending in this Rex pane")
+  .description(
+    "Report an nvim starting or ending in this Rex pane, with the socket it listens on, so ah can open files and lists in it. ah's nvim plugin runs it. Does nothing outside Rex.",
+  )
+  .addArgument(new Argument("<event>", "What the nvim did").choices(EDITOR_EVENTS))
+  .requiredOption("--server <socket>", "Where the nvim listens (v:servername)")
+  .addOption(portOption())
+  .action(async (event, { server, port }) => {
+    const report = editorEvent(event, server)
+    if (report) await send(port, report)
+  })
+
 export const hook = new Command("hook")
-  .description("Commands for use in agent and shell hooks")
+  .description("Commands for use in agent, shell and editor hooks")
   .addCommand(agent)
   .addCommand(shell)
+  .addCommand(editor)

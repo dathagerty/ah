@@ -54,6 +54,7 @@ import {
   applySummary,
   blockOf,
   emptyRegistry,
+  EDITOR_EVENTS,
   HOOK_EVENTS,
   loadRegistry,
   prune,
@@ -76,6 +77,12 @@ export function parseEvent(o: unknown): RegistryEvent | null {
   const label = str(o.label)
   if (o.kind === "shell") {
     return block && label ? { kind: "shell", block, label } : null
+  }
+  if (o.kind === "editor") {
+    const socket = str(o.socket)
+    return block && socket && isOneOf(EDITOR_EVENTS, o.event)
+      ? { kind: "editor", event: o.event, block, socket }
+      : null
   }
   const session = str(o.session)
   const { event, harness } = o

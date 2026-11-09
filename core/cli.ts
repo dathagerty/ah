@@ -1,8 +1,9 @@
-// `ah workspace` and `ah debug agents`, which read the registry as the
+// `ah workspace`, `ah debug agents` and `ah debug editors`, which read the registry as the
 // server last saved it, so they work with the server down, except
 // `ah workspace agents`, which asks the server.
 
 import { Command } from "@commander-js/extra-typings"
+import { existsSync } from "node:fs"
 import { resolve } from "node:path"
 import type { RexState, Tab, WorkspaceRoot } from "./model.ts"
 import { die, ensureStarted, portOption } from "../platform/cli.ts"
@@ -12,6 +13,31 @@ import { blockOf, emptyRegistry, loadRegistry } from "./registry.ts"
 import { rootFinder, tabRoot } from "./workspace.ts"
 import { isCurrent } from "./core.ts"
 import { listAgents, readClaudeProcesses } from "./agent_view.ts"
+
+/** `ah debug editors` */
+export const debugEditors = new Command("editors")
+  .summary("List the nvims ah knows about in Rex panes")
+  .description(
+    "List the nvims that said they started in a Rex pane (`ah hook editor`), with the tab each is in and whether its socket is still there.",
+  )
+  .option("--json", "Print JSON")
+  .action(async ({ json }) => {
+    const rex: RexState | null = await readRex().catch(() => null)
+    const tabs = new Map<string, string>()
+    for (const s of rex?.sessions ?? [])
+      for (const t of s.tabs) for (const b of t.blocks) tabs.set(b.id, t.id)
+    const list = [...(loadRegistry() ?? emptyRegistry()).editors].map(([block, e]) => ({
+      block,
+      tab: tabs.get(block) ?? null,
+      socket: e.socket,
+      listening: existsSync(e.socket),
+    }))
+    if (json) return console.log(JSON.stringify(list, null, 2))
+    for (const e of list)
+      console.log(
+        [e.block, e.tab ?? "gone", e.socket, e.listening ? "" : "no socket"].join("\t"),
+      )
+  })
 
 /** `ah debug agents` */
 export const debugAgents = new Command("agents")

@@ -21,7 +21,7 @@
 // blocks whose tabs need a new title, and a summary to start. The caller
 // does the async parts afterwards, so two events can't interleave.
 
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs"
 import { dirname } from "node:path"
 import { isOneOf, isRecord, isString, isStringOrNull } from "../platform/guards.ts"
 import { ahStateDir } from "../platform/paths.ts"
@@ -55,6 +55,15 @@ export interface Registry {
   /** Files whose threads hold requests no agent has taken, to send when
    * one turns up */
   held: Set<string>
+  /** A pane -> the nvim running in it, which ah can call into at its RPC
+   * socket (`ah hook editor`, editors/neovim/lua/ah/editor.lua) */
+  editors: Map<BlockId, EditorRecord>
+}
+
+/** An nvim in a pane */
+export interface EditorRecord {
+  /** Where it listens (v:servername) */
+  socket: string
 }
 
 export const emptyRegistry = (): Registry => ({
@@ -65,6 +74,7 @@ export const emptyRegistry = (): Registry => ({
   picks: new Map(),
   outbox: new Map(),
   held: new Set(),
+  editors: new Map(),
 })
 
 /** An agent's id, from its home */
@@ -110,6 +120,9 @@ export const HOOK_EVENTS = [
 ] as const
 export type HookEventName = (typeof HOOK_EVENTS)[number]
 
+export const EDITOR_EVENTS = ["start", "end"] as const
+export type EditorEventName = (typeof EDITOR_EVENTS)[number]
+
 export type RegistryEvent =
   | {
       kind: "hook"
@@ -129,6 +142,8 @@ export type RegistryEvent =
       transcript?: string
     }
   | { kind: "shell"; block: BlockId; label: string }
+  /** An nvim starting or ending in a pane */
+  | { kind: "editor"; event: EditorEventName; block: BlockId; socket: string }
 
 export interface SummaryJob {
   agent: AgentId
@@ -153,6 +168,13 @@ export function apply(r: Registry, e: RegistryEvent, now = Date.now()): Applied 
     const agent = r.agents.get(e.block)
     if (agent) agent.shown = false
     return { agent: null, blocks: [e.block], summarize: null }
+  }
+  if (e.kind === "editor") {
+    // A later nvim in the pane takes it over, and an earlier one ending
+    // leaves that one there
+    if (e.event === "start") r.editors.set(e.block, { socket: e.socket })
+    else if (r.editors.get(e.block)?.socket === e.socket) r.editors.delete(e.block)
+    return { agent: null, blocks: [], summarize: null }
   }
 
   const id = agentId(r, e)!
@@ -232,8 +254,8 @@ export function applySummary(
 }
 
 /** Drop what nothing will need again: agents in panes Rex no longer has,
- * agents outside Rex with no event for a week, and the labels, picks and
- * unsent messages of closed blocks.
+ * agents outside Rex with no event for a week, the labels, picks, unsent
+ * messages and editors of closed blocks, and editors whose sockets are gone.
  * `live` is every block in the tree; pass null when Rex isn't running, so quitting it
  * doesn't forget everything, and only age counts. `recent` are blocks an
  * event just named, which the last RexState may not have caught up with.
@@ -244,6 +266,7 @@ export function prune(
   recent: Set<BlockId> = new Set(),
   now = Date.now(),
   maxAgeMs = 7 * 24 * 60 * 60 * 1000,
+  socketExists: (path: string) => boolean = existsSync,
 ): boolean {
   const gone = (block: BlockId) => live && !live.has(block) && !recent.has(block)
   let changed = false
@@ -252,6 +275,13 @@ export function prune(
     const stale = now - a.updatedAt > maxAgeMs && !(block && live?.has(block))
     if ((block && gone(block)) || stale) {
       r.agents.delete(id)
+      changed = true
+    }
+  }
+  // An nvim that crashed never said it ended, but its socket went with it
+  for (const [block, editor] of r.editors) {
+    if (gone(block) || !socketExists(editor.socket)) {
+      r.editors.delete(block)
       changed = true
     }
   }
@@ -278,6 +308,7 @@ interface Stored {
   picks: Record<string, AgentId>
   outbox: Record<string, string[]>
   held: string[]
+  editors: Record<string, EditorRecord>
 }
 
 /** The registry as last saved, or null if it never was. Entries that don't
@@ -298,6 +329,7 @@ export function loadRegistry(file = registryFile()): Registry | null {
     picks: entries(raw.picks, isString),
     outbox: entries(raw.outbox, isStrings),
     held: new Set(Array.isArray(raw.held) ? raw.held.filter(isString) : []),
+    editors: entries(raw.editors, isEditorRecord),
   }
 }
 
@@ -340,6 +372,9 @@ const isWorkspaceRecord = (w: unknown): w is WorkspaceRecord =>
 
 const isStrings = (v: unknown): v is string[] => Array.isArray(v) && v.every(isString)
 
+const isEditorRecord = (e: unknown): e is EditorRecord =>
+  isRecord(e) && typeof e.socket === "string" && e.socket !== ""
+
 function entries<T>(value: unknown, is: (v: unknown) => v is T): Map<string, T> {
   const map = new Map<string, T>()
   if (!isRecord(value)) return map
@@ -356,6 +391,7 @@ export function saveRegistry(r: Registry, file = registryFile()) {
     picks: Object.fromEntries(r.picks),
     outbox: Object.fromEntries(r.outbox),
     held: [...r.held],
+    editors: Object.fromEntries(r.editors),
   }
   mkdirSync(dirname(file), { recursive: true })
   // Rename over the old file so a crash mid-write can't leave half of one
