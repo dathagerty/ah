@@ -26,18 +26,12 @@ const FAKE_AH = [
      process.exit(0)
    }
    const disk = fs.readFileSync(args[args.indexOf("--file") + 1], "utf8")
-   fs.writeFileSync(process.env.AH_FAKE_OUT, JSON.stringify({ args, stdin, disk }))
+   // Renamed into place, so a reader never sees it half written
+   fs.writeFileSync(process.env.AH_FAKE_OUT + ".tmp", JSON.stringify({ args, stdin, disk }))
+   fs.renameSync(process.env.AH_FAKE_OUT + ".tmp", process.env.AH_FAKE_OUT)
    console.log("sent")`,
   "--",
 ]
-
-interface Agents {
-  /** What `ah workspace agents` lists, or "fail" */
-  agents?: Agent[] | "fail"
-  /** The list item to pick (1-based) when asked which agent, or none to
-   * dismiss the list */
-  choose?: number
-}
 
 interface Agent {
   id: string
@@ -48,25 +42,57 @@ interface Agent {
   target: boolean
 }
 
-/** Lua that sets the plugin up with the fake ah, leader as space, and the
- * comment prompt answered with `answer`. Records whether the prompt was
- * shown (`asked`) and with what (`prompt`), and the agent list's items as
- * shown (`listed`). */
-function setup(answer: string, { agents, choose }: Agents = {}) {
+/** Lua that sets the plugin up with the fake ah listing `agents` (or failing
+ * to, with "fail"), leader as space and rounded borders, as in the user's
+ * config. Then helpers for the comment float:
+ *
+ * - `float()`: its window, if it's open
+ * - `title()` and `footer()`: its title and footer, trimmed
+ * - `comment(open, answer)`: type `open` (the keys that open it), wait for
+ *   it to open in insert mode, then type `answer` and Enter if given. False
+ *   if it didn't.
+ * - `sent()`: what the fake ah got for the comment, waiting for it a while,
+ *   or vim.NIL
+ */
+function setup(agents: Agent[] | "fail" = []) {
   return `
     vim.g.mapleader = " "
+    vim.o.winborder = "rounded"
     vim.env.AH_FAKE_OUT = vim.fs.dirname(file) .. "/sent.json"
-    vim.env.AH_FAKE_AGENTS = ${JSON.stringify(agents === "fail" ? "fail" : JSON.stringify(agents ?? []))}
+    vim.env.AH_FAKE_AGENTS = ${JSON.stringify(agents === "fail" ? "fail" : JSON.stringify(agents))}
     require("ah").setup({ cmd = vim.json.decode(${JSON.stringify(JSON.stringify(FAKE_AH))}) })
-    asked, prompt, listed = false, vim.NIL, vim.NIL
-    vim.ui.input = function(opts, done)
-      asked, prompt = true, opts.prompt
-      done(${JSON.stringify(answer)})
+
+    function float()
+      for _, win in ipairs(vim.api.nvim_list_wins()) do
+        if vim.api.nvim_win_get_config(win).relative ~= "" then return win end
+      end
     end
-    vim.ui.select = function(items, opts, done)
-      listed = vim.tbl_map(opts.format_item or tostring, items)
-      local i = ${choose ?? "nil"}
-      done(i and items[i], i)
+    local function text_of_chunks(chunks)
+      if type(chunks) == "string" then return chunks end
+      local s = ""
+      for _, chunk in ipairs(chunks or {}) do s = s .. chunk[1] end
+      return s
+    end
+    function title()
+      local win = float()
+      return win and vim.trim(text_of_chunks(vim.api.nvim_win_get_config(win).title)) or vim.NIL
+    end
+    function footer()
+      local win = float()
+      return win and vim.trim(text_of_chunks(vim.api.nvim_win_get_config(win).footer)) or vim.NIL
+    end
+    function comment(open, answer)
+      keys(open)
+      -- Insert mode starts when the main loop next runs, after the float opens
+      local ready = function() return float() and vim.api.nvim_get_mode().mode == "i" end
+      if not wait_for(ready, 1500) then return false end
+      if answer then keys(answer .. "<CR>") end
+      return true
+    end
+    function sent(ms)
+      wait_for(function() return read(vim.env.AH_FAKE_OUT) end, ms or 1500)
+      local out = read(vim.env.AH_FAKE_OUT)
+      return out and vim.json.decode(out) or vim.NIL
     end
   `
 }
@@ -96,17 +122,11 @@ const agentC: Agent = {
   target: false,
 }
 
-/** Lua that waits for the fake ah to run, then returns what it got, the
- * file's path and the notices */
+/** Lua returning what was sent, the file's path and the notices */
 const SENT = `
-  local out = vim.env.AH_FAKE_OUT
-  wait_for(function() return read(out) and #notices > 0 end, 2000)
-  local sent = read(out)
-  return {
-    sent = sent and vim.json.decode(sent) or vim.NIL,
-    file = vim.api.nvim_buf_get_name(0),
-    notices = notices,
-  }
+  local got = sent()
+  wait_for(function() return #notices > 0 end, 500)
+  return { sent = got, file = vim.api.nvim_buf_get_name(0), notices = notices }
 `
 
 interface Sent {
@@ -120,9 +140,9 @@ describe.skipIf(!hasNvim).concurrent("commenting to the agent", () => {
     const result = await inNvim<Sent>({
       file: "one\ntwo\nthree\n",
       lua: `
-        ${setup("fix this")}
+        ${setup()}
         vim.cmd.edit(file)
-        keys("j ac")
+        comment("j ac", "fix this")
         ${SENT}
       `,
     })
@@ -137,9 +157,9 @@ describe.skipIf(!hasNvim).concurrent("commenting to the agent", () => {
     const result = await inNvim<Sent>({
       file: "one\ntwo\nthree\n",
       lua: `
-        ${setup("fix these")}
+        ${setup()}
         vim.cmd.edit(file)
-        keys("Vj ac")
+        comment("Vj ac", "fix these")
         ${SENT}
       `,
     })
@@ -160,9 +180,9 @@ describe.skipIf(!hasNvim).concurrent("commenting to the agent", () => {
     const result = await inNvim<Sent>({
       file: "one\ntwo\n",
       lua: `
-        ${setup("fix the file")}
+        ${setup()}
         vim.cmd.edit(file)
-        keys(" aC")
+        comment(" aC", "fix the file")
         ${SENT}
       `,
     })
@@ -172,32 +192,30 @@ describe.skipIf(!hasNvim).concurrent("commenting to the agent", () => {
     })
   })
 
-  test("a blank comment isn't sent", async () => {
+  test("a blank comment closes the float and isn't sent", async () => {
     const result = await inNvim({
       file: "one\n",
       lua: `
-        ${setup("   ")}
+        ${setup()}
         vim.cmd.edit(file)
-        keys(" ac")
-        sleep(500)
-        return { asked = asked, sent = read(vim.env.AH_FAKE_OUT) or vim.NIL }
+        local opened = comment(" ac", "   ")
+        return { opened = opened, open = float() ~= nil, sent = sent(500) }
       `,
     })
-    expect(result).toEqual({ asked: true, sent: null })
+    expect(result).toEqual({ opened: true, open: false, sent: null })
   })
 
   test("a buffer with no file says so and sends nothing", async () => {
     const result = await inNvim({
       file: "one\n",
       lua: `
-        ${setup("fix this")}
-        keys(" ac")
-        sleep(500)
-        return { sent = read(vim.env.AH_FAKE_OUT) or vim.NIL, notices = notices }
+        ${setup()}
+        local opened = comment(" ac")
+        return { opened = opened, notices = notices }
       `,
     })
     expect(result).toEqual({
-      sent: null,
+      opened: false,
       notices: [{ msg: "ah: this buffer isn't a file", level: 4 }],
     })
   })
@@ -206,9 +224,9 @@ describe.skipIf(!hasNvim).concurrent("commenting to the agent", () => {
     const result = await inNvim<Sent>({
       file: "one\ntwo\n",
       lua: `
-        ${setup("fix this")}
+        ${setup()}
         vim.cmd.edit(file)
-        keys("Onew<Esc>j ac")
+        comment("Onew<Esc>j ac", "fix this")
         ${SENT}
       `,
     })
@@ -223,10 +241,10 @@ describe.skipIf(!hasNvim).concurrent("commenting to the agent", () => {
     const result = await inNvim({
       file: "one\n",
       lua: `
-        ${setup("fix this")}
+        ${setup()}
         vim.cmd.edit(file)
-        keys("AX<Esc> ac")
-        wait_for(function() return read(vim.env.AH_FAKE_OUT) end, 2000)
+        comment("AX<Esc> ac", "fix this")
+        sent()
         keys("AY<Esc>")
         write("oneX\\ntwo\\n")
         wait_for(function() return text():find("two") end, 2000)
@@ -241,31 +259,23 @@ describe.skipIf(!hasNvim).concurrent("commenting to the agent", () => {
     const result = await inNvim({
       file: "one\n",
       lua: `
-        ${setup("fix this")}
+        ${setup()}
         vim.env.AH_FAKE_MERGE_FAILS = "1"
         vim.cmd.edit(file)
         keys("AX<Esc>")
         write("one\\ntwo\\n")
         wait_for(function() return #notices > 0 end, 2000)
-        keys(" ac")
-        sleep(500)
-        local refused = { asked = asked, sent = read(vim.env.AH_FAKE_OUT) or vim.NIL, notices = notices }
+        local refused = { opened = comment(" ac"), sent = sent(300), notices = notices }
         notices = {}
         vim.env.AH_FAKE_MERGE_FAILS = nil
         write("one\\ntwo\\nthree\\n")
         wait_for(function() return text():find("three") end, 2000)
-        keys(" ac")
-        wait_for(function() return read(vim.env.AH_FAKE_OUT) end, 2000)
-        local sent = read(vim.env.AH_FAKE_OUT)
-        return {
-          refused = refused,
-          sent = sent and vim.json.decode(sent) or vim.NIL,
-          file = vim.api.nvim_buf_get_name(0),
-        }
+        comment(" ac", "fix this")
+        return { refused = refused, sent = sent(), file = vim.api.nvim_buf_get_name(0) }
       `,
     })
     expect(result.refused).toEqual({
-      asked: false,
+      opened: false,
       sent: null,
       notices: [
         { msg: expect.stringContaining("couldn't merge"), level: 4 },
@@ -280,89 +290,269 @@ describe.skipIf(!hasNvim).concurrent("commenting to the agent", () => {
   })
 })
 
-/** Lua that comments on line 1 and returns the prompt, the agent list as
- * shown, and the arguments ah got, if it got any */
-const PICK = `
-  vim.cmd.edit(file)
-  keys(" ac")
-  wait_for(function() return read(vim.env.AH_FAKE_OUT) end, 1500)
-  local sent = read(vim.env.AH_FAKE_OUT)
-  return {
-    prompt = prompt,
-    listed = listed,
-    args = sent and vim.json.decode(sent).args or vim.NIL,
-    file = vim.api.nvim_buf_get_name(0),
-  }
-`
+describe.skipIf(!hasNvim).concurrent("the comment float", () => {
+  const LINES = Array.from({ length: 100 }, (_, i) => `line ${i + 1}`).join("\n") + "\n"
 
-interface Picked {
-  prompt: string | null
-  listed: string[] | null
-  args: string[] | null
-  file: string
-}
+  test("opens under the commented lines, in insert mode", async () => {
+    const result = await inNvim({
+      file: LINES,
+      lua: `
+        ${setup()}
+        vim.cmd.edit(file)
+        local main = vim.api.nvim_get_current_win()
+        comment("2jVj ac")
+        local line = vim.fn.screenpos(main, 4, 1).row
+        return { float_row = vim.api.nvim_win_get_position(float())[1], line_row = line, mode = vim.api.nvim_get_mode().mode }
+      `,
+    })
+    // screenpos counts rows from 1, window positions from 0: the float starts
+    // on a row past the last commented line's
+    expect(result.float_row).toBeGreaterThanOrEqual(result.line_row as number)
+    expect(result.mode).toEqual("i")
+  })
+
+  test("opens above the commented lines when there's no room under them", async () => {
+    const result = await inNvim({
+      file: LINES,
+      lua: `
+        ${setup()}
+        vim.cmd.edit(file)
+        local main = vim.api.nvim_get_current_win()
+        comment("L ac")
+        local line = vim.fn.screenpos(main, vim.fn.line("w$", main), 1).row
+        return { float_row = vim.api.nvim_win_get_position(float())[1], line_row = line }
+      `,
+    })
+    expect(result.float_row).toBeLessThan((result.line_row as number) - 1)
+  })
+
+  test("grows with the text, up to 8 lines, and is at most 72 columns wide", async () => {
+    const result = await inNvim({
+      file: "one\n",
+      lua: `
+        ${setup()}
+        vim.cmd.edit(file)
+        comment(" ac")
+        local win = float()
+        local heights = { vim.api.nvim_win_get_height(win) }
+        keys("a<C-j>b<C-j>c")
+        table.insert(heights, vim.api.nvim_win_get_height(win))
+        keys(string.rep("<C-j>x", 10))
+        table.insert(heights, vim.api.nvim_win_get_height(win))
+        return { heights = heights, width = vim.api.nvim_win_get_width(win) }
+      `,
+    })
+    expect(result.heights).toEqual([1, 3, 8])
+    expect(result.width).toBeLessThanOrEqual(72)
+  })
+
+  test("Ctrl-J, Shift-Enter and Alt-Enter add lines", async () => {
+    const result = await inNvim<Sent>({
+      file: "one\n",
+      lua: `
+        ${setup()}
+        vim.cmd.edit(file)
+        comment(" ac", "a<C-j>b<S-CR>c<M-CR>d")
+        ${SENT}
+      `,
+    })
+    expect(result.sent.stdin).toEqual("a\nb\nc\nd")
+  })
+
+  test("Esc goes to normal mode and keeps the text; Esc again cancels", async () => {
+    const result = await inNvim({
+      file: "one\n",
+      lua: `
+        ${setup()}
+        vim.cmd.edit(file)
+        comment(" ac")
+        keys("fix<Esc>")
+        local after_one = { open = float() ~= nil, mode = vim.api.nvim_get_mode().mode }
+        keys("<Esc>")
+        return { after_one = after_one, open = float() ~= nil, sent = sent(500) }
+      `,
+    })
+    expect(result).toEqual({
+      after_one: { open: true, mode: "n" },
+      open: false,
+      sent: null,
+    })
+  })
+
+  test("Enter in normal mode sends", async () => {
+    const result = await inNvim<Sent>({
+      file: "one\n",
+      lua: `
+        ${setup()}
+        vim.cmd.edit(file)
+        comment(" ac")
+        keys("fix this<Esc><CR>")
+        ${SENT}
+      `,
+    })
+    expect(result.sent.stdin).toEqual("fix this")
+  })
+
+  // Not Ctrl-C: typed, it interrupts before any mapping of it runs, in insert
+  // or normal mode, so it only leaves insert mode, as Esc does
+  test("q in normal mode cancels", async () => {
+    const result = await inNvim({
+      file: "one\n",
+      lua: `
+        ${setup()}
+        vim.cmd.edit(file)
+        local opened = comment(" ac")
+        keys("fix<Esc>q")
+        return { opened = opened, open = float() ~= nil, sent = sent(500) }
+      `,
+    })
+    expect(result).toEqual({ opened: true, open: false, sent: null })
+  })
+
+  test("leaving it closes it without sending", async () => {
+    const result = await inNvim({
+      file: "one\n",
+      lua: `
+        ${setup()}
+        vim.cmd.edit(file)
+        local main = vim.api.nvim_get_current_win()
+        local opened = comment(" ac")
+        keys("fix")
+        vim.api.nvim_set_current_win(main)
+        sleep(50)
+        return { opened = opened, open = float() ~= nil, sent = sent(500) }
+      `,
+    })
+    expect(result).toEqual({ opened: true, open: false, sent: null })
+  })
+
+  test("is titled with the file and lines, and its footer shows the keys", async () => {
+    const result = await inNvim({
+      file: "one\ntwo\nthree\n",
+      lua: `
+        ${setup()}
+        vim.cmd.edit(file)
+        comment("Vj ac")
+        local on_lines = { title = title(), footer = footer() }
+        keys("<Esc><Esc>")
+        comment(" aC")
+        return { on_lines = on_lines, on_file = title() }
+      `,
+    })
+    expect(result).toEqual({
+      on_lines: { title: "notes.md:1-2", footer: "⏎ send · ⌃J newline · esc cancel" },
+      on_file: "notes.md",
+    })
+  })
+})
 
 describe.skipIf(!hasNvim).concurrent("picking the agent", () => {
-  test("with none listed, as outside Rex, sends without asking which", async () => {
-    const result = await inNvim<Picked>({
+  test("with none listed, as outside Rex, sends without --agent", async () => {
+    const result = await inNvim({
       file: "one\n",
-      lua: `${setup("fix this")} ${PICK}`,
+      lua: `
+        ${setup()}
+        vim.cmd.edit(file)
+        comment(" ac")
+        local shown = title()
+        keys("fix this<CR>")
+        return { title = shown, args = sent().args, file = vim.api.nvim_buf_get_name(0) }
+      `,
     })
     expect(result).toEqual({
-      prompt: "Comment: ",
-      listed: null,
+      title: "notes.md:1",
       args: ["message", "send", "--file", result.file, "--lines=1"],
       file: result.file,
     })
   })
 
-  test("with one, names it in the prompt and sends without asking which", async () => {
-    const result = await inNvim<Picked>({
+  test("with one, names it in the title and sends without --agent", async () => {
+    const result = await inNvim({
       file: "one\n",
-      lua: `${setup("fix this", { agents: [agentA] })} ${PICK}`,
+      lua: `
+        ${setup([agentA])}
+        vim.cmd.edit(file)
+        comment(" ac")
+        local shown = { title = title(), footer = footer() }
+        keys("fix this<CR>")
+        return { shown = shown, args = sent().args, file = vim.api.nvim_buf_get_name(0) }
+      `,
     })
     expect(result).toEqual({
-      prompt: "Comment → ~/code/a | fixing login (claude): ",
-      listed: null,
+      shown: {
+        title: "notes.md:1 → ~/code/a | fixing login (claude)",
+        footer: "⏎ send · ⌃J newline · esc cancel",
+      },
       args: ["message", "send", "--file", result.file, "--lines=1"],
       file: result.file,
     })
   })
 
-  test("with several, asks which, the pane's pick first, and sends to it", async () => {
-    const result = await inNvim<Picked>({
+  test("with several, starts on the pane's pick and sends to it with --agent", async () => {
+    const result = await inNvim({
       file: "one\n",
-      lua: `${setup("fix this", { agents: [agentA, agentB, agentC], choose: 2 })} ${PICK}`,
+      lua: `
+        ${setup([agentA, agentB, agentC])}
+        vim.cmd.edit(file)
+        comment(" ac")
+        local shown = { title = title(), footer = footer() }
+        keys("fix this<CR>")
+        return { shown = shown, args = sent().args, file = vim.api.nvim_buf_get_name(0) }
+      `,
     })
     expect(result).toEqual({
-      prompt: "Comment → ~/code/a | fixing login (claude): ",
-      listed: [
-        "~/code/b | tests (codex, working)",
-        "~/code/a | fixing login (claude)",
-        "~/code/c (opencode)",
+      shown: {
+        title: "notes.md:1 → ~/code/b | tests (codex, working)",
+        footer: "⏎ send · ⌃J newline · ⇥ agent · esc cancel",
+      },
+      args: ["message", "send", "--file", result.file, "--lines=1", "--agent", "block:b"],
+      file: result.file,
+    })
+  })
+
+  test("Tab and Shift-Tab cycle the agents, in either mode, and send to the one shown", async () => {
+    const result = await inNvim({
+      file: "one\n",
+      lua: `
+        ${setup([agentA, agentB, agentC])}
+        vim.cmd.edit(file)
+        comment(" ac")
+        local titles = {}
+        keys("<Tab>")
+        table.insert(titles, title())
+        keys("<S-Tab><S-Tab>")
+        table.insert(titles, title())
+        keys("<Esc><Tab>")
+        table.insert(titles, title())
+        keys("<S-Tab>ifix this<CR>")
+        return { titles = titles, args = sent().args, file = vim.api.nvim_buf_get_name(0) }
+      `,
+    })
+    expect(result).toEqual({
+      titles: [
+        "notes.md:1 → ~/code/a | fixing login (claude)",
+        "notes.md:1 → ~/code/c (opencode)",
+        "notes.md:1 → ~/code/b | tests (codex, working)",
       ],
-      args: ["message", "send", "--file", result.file, "--lines=1", "--agent", "block:a"],
+      args: ["message", "send", "--file", result.file, "--lines=1", "--agent", "block:c"],
       file: result.file,
     })
   })
 
-  test("dismissing the list sends nothing", async () => {
-    const result = await inNvim<Picked>({
+  test("when listing them fails, sends without --agent", async () => {
+    const result = await inNvim({
       file: "one\n",
-      lua: `${setup("fix this", { agents: [agentA, agentB] })} ${PICK}`,
-    })
-    expect(result).toMatchObject({ prompt: null, args: null })
-    expect(result.listed).toHaveLength(2)
-  })
-
-  test("when listing them fails, sends without asking which", async () => {
-    const result = await inNvim<Picked>({
-      file: "one\n",
-      lua: `${setup("fix this", { agents: "fail" })} ${PICK}`,
+      lua: `
+        ${setup("fail")}
+        vim.cmd.edit(file)
+        comment(" ac")
+        local shown = title()
+        keys("fix this<CR>")
+        return { title = shown, args = sent().args, file = vim.api.nvim_buf_get_name(0) }
+      `,
     })
     expect(result).toEqual({
-      prompt: "Comment: ",
-      listed: null,
+      title: "notes.md:1",
       args: ["message", "send", "--file", result.file, "--lines=1"],
       file: result.file,
     })
@@ -374,11 +564,9 @@ describe.skipIf(!hasNvim).concurrent("the selection a comment sends", () => {
    * --selection ah got */
   const SELECTION = `
     vim.cmd.edit(file)
-    keys("V ac")
-    wait_for(function() return read(vim.env.AH_FAKE_OUT) end, 2000)
-    local sent = read(vim.env.AH_FAKE_OUT)
-    local args = sent and vim.json.decode(sent).args or {}
-    for _, arg in ipairs(args) do
+    comment("V ac", "fix this")
+    local got = sent()
+    for _, arg in ipairs(got ~= vim.NIL and got.args or {}) do
       if vim.startswith(arg, "--selection=") then return { selection = arg:sub(#"--selection=" + 1) } end
     end
     return { selection = vim.NIL }
@@ -387,7 +575,7 @@ describe.skipIf(!hasNvim).concurrent("the selection a comment sends", () => {
   test("is cut to 4000 characters, as Helix cuts it, to stay under the argument size limit", async () => {
     const result = await inNvim({
       file: `${"a".repeat(5000)}\n`,
-      lua: `${setup("fix this")} ${SELECTION}`,
+      lua: `${setup()} ${SELECTION}`,
     })
     expect(result).toEqual({ selection: "a".repeat(4000) })
   })
@@ -395,7 +583,7 @@ describe.skipIf(!hasNvim).concurrent("the selection a comment sends", () => {
   test("is cut between characters, not inside one", async () => {
     const result = await inNvim({
       file: `${"é".repeat(5000)}\n`,
-      lua: `${setup("fix this")} ${SELECTION}`,
+      lua: `${setup()} ${SELECTION}`,
     })
     expect(result).toEqual({ selection: "é".repeat(4000) })
   })
@@ -403,7 +591,7 @@ describe.skipIf(!hasNvim).concurrent("the selection a comment sends", () => {
   test("under 4000 characters, goes whole", async () => {
     const result = await inNvim({
       file: `${"a".repeat(4000)}\n`,
-      lua: `${setup("fix this")} ${SELECTION}`,
+      lua: `${setup()} ${SELECTION}`,
     })
     expect(result).toEqual({ selection: "a".repeat(4000) })
   })
