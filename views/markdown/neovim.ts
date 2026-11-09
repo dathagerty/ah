@@ -14,6 +14,9 @@ export const neovim: TerminalEditor = {
   // ⌘S as a kitty keyboard protocol super chord, which Neovim reads as <D-s>
   // and neovim_command.ts maps to a save
   chords: { s: `\x1b[${"s".codePointAt(0)};9u` },
+  // Over its RPC socket (neovim_command.ts, editors/neovim/remote.ts), which
+  // works from any mode, rather than typing goto and lower
+  reveal: "rpc",
   // G for the line, a count of l for the column, and zt to put the line at
   // the top of the view
   goto: (line, column) => `${NORMAL}${line + 1}G0${column ? `${column}l` : ""}zt`,

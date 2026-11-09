@@ -12,6 +12,7 @@ import { FitAddon } from "@xterm/addon-fit"
 import { WebglAddon } from "@xterm/addon-webgl"
 import type { EditorPane } from "./editor.ts"
 import type { TerminalEditor } from "./terminal_editor.ts"
+import { revealRow } from "./reveal_row.ts"
 import { terminalLook } from "./terminal_theme.ts"
 
 /** The page's theme vars as xterm's options: Rex's palette for the OS's
@@ -37,6 +38,8 @@ export class TerminalPane implements EditorPane {
   /** Types keys into the editor, set once it has drawn: before that it may not
    * have the pty in raw mode yet. What needs it sooner waits in #waiters. */
   #type: ((keys: string) => void) | null = null
+  /** Sends a message to the backend, set with #type */
+  #send: ((msg: Record<string, unknown>) => void) | null = null
   #waiters: (() => void)[] = []
   /** When the editor last sent output, to tell when it's done drawing */
   #outputAt = 0
@@ -75,26 +78,40 @@ export class TerminalPane implements EditorPane {
     this.#term = null
   }
 
-  /** The editor's goto, and then its lower to bring the cursor's line level
-   * with `y`, staying a fifth of the text area from either edge, and at least
-   * the editor's scrolloff */
+  /** The cursor at `line` and `column`, its line level with `y`, staying a
+   * fifth of the text area from either edge, and at least the editor's
+   * scrolloff (reveal_row.ts). An editor that takes it over RPC gets it as
+   * one message to the backend; otherwise its goto is typed, and then its
+   * lower, to bring the line down to that row. */
   async reveal(line: number, column: number, y: number) {
     const type =
       this.#type ??
       (await new Promise<(keys: string) => void>((resolve) =>
         this.#waiters.push(() => resolve(this.#type!)),
       ))
+    const row = () => {
+      const term = this.#term
+      const screen = term?.element?.querySelector(".xterm-screen")?.getBoundingClientRect()
+      if (!term || !screen?.height) return null
+      return revealRow({
+        y,
+        screenTop: screen.top,
+        cellHeight: screen.height / term.rows,
+        rows: term.rows,
+        statusRows: this.#editor.statusRows,
+        scrolloff: this.#editor.scrolloff,
+      })
+    }
+    if (this.#editor.reveal === "rpc") {
+      this.#send?.({ type: "reveal", line, column, row: row() ?? 0 })
+      return
+    }
     await this.#typeAndDraw(type, this.#editor.goto(line, column))
-    const term = this.#term
-    const screen = term?.element?.querySelector(".xterm-screen")?.getBoundingClientRect()
-    if (!term || !screen?.height) return
-    const cell = screen.height / term.rows
-    const textRows = term.rows - this.#editor.statusRows
-    const margin = Math.max(Math.round(textRows / 5), this.#editor.scrolloff)
-    const level = Math.floor((y - screen.top) / cell)
-    const row = Math.max(margin, Math.min(level, textRows - 1 - margin))
-    const top = term.buffer.active.cursorY
-    if (row > top) type(this.#editor.lower(row - top))
+    const target = row()
+    const top = this.#term?.buffer.active.cursorY
+    if (target !== null && top !== undefined && target > top) {
+      type(this.#editor.lower(target - top))
+    }
   }
 
   /** Type keys into the editor and wait until it has drawn what they did:
@@ -181,13 +198,17 @@ export class TerminalPane implements EditorPane {
       this.#outputAt = performance.now()
       if (this.#type !== type) {
         this.#type = type
+        this.#send = send
         for (const wake of this.#waiters) wake()
         this.#waiters = []
       }
     }
     ws.onclose = (e) => {
       if (this.#closed) return
-      if (this.#type === type) this.#type = null
+      if (this.#type === type) {
+        this.#type = null
+        this.#send = null
+      }
       // The editor quit, rather than failing to start or losing the server or
       // the file. One that quits soon after starting may be failing, and
       // restarting it could loop.

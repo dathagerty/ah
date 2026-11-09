@@ -7,6 +7,7 @@
 import { dirname } from "node:path"
 import { type IPty, spawn } from "@lydell/node-pty"
 import type { WebSocket } from "ws"
+import { NvimRemote } from "../../editors/neovim/remote.ts"
 import type { EditorBackend } from "./editor.ts"
 import type { TerminalCommand } from "./terminal_editor.ts"
 
@@ -14,6 +15,9 @@ type PtyMessage =
   | { type: "input"; data: string }
   | { type: "resize"; cols: number; rows: number }
   | { type: "redraw" }
+  /** ⌘-click in the preview, for an editor with a socket (terminal_editor.ts):
+   * the 0-based line and column, on the 0-based text row */
+  | { type: "reveal"; line: number; column: number; row: number }
 
 /** A text frame from the page, or null if it isn't one we know: pty.write
  * and pty.resize throw on anything else, inside an event handler */
@@ -37,6 +41,15 @@ export function parsePtyMessage(text: string): PtyMessage | null {
     return cols !== null && rows !== null ? { type: "resize", cols, rows } : null
   }
   if (msg.type === "redraw") return { type: "redraw" }
+  if (msg.type === "reveal") {
+    const index = (n: unknown) => (Number.isInteger(n) && Number(n) >= 0 ? Number(n) : null)
+    const line = "line" in msg ? index(msg.line) : null
+    const column = "column" in msg ? index(msg.column) : null
+    const row = "row" in msg ? index(msg.row) : null
+    return line !== null && column !== null && row !== null
+      ? { type: "reveal", line, column, row }
+      : null
+  }
   return null
 }
 
@@ -70,8 +83,9 @@ export class PtyBackend implements EditorBackend {
     }
     let command: string
     let args: string[]
+    let socket: string | undefined
     try {
-      ;({ command, args } = await this.#command(this.file))
+      ;({ command, args, socket } = await this.#command(this.file))
     } catch (e) {
       console.error("ah: couldn't set up the editor:", e)
       return ws.close(1011, "couldn't start the editor")
@@ -93,6 +107,9 @@ export class PtyBackend implements EditorBackend {
       return ws.close(1011, "couldn't start the editor")
     }
     this.#ptys.add(pty)
+    // Calls into the editor over its socket, once it's listening; reveals
+    // sent before then wait for it
+    const remote = socket ? new NvimRemote(socket) : null
     console.error(
       `ah: ${command} started for ${this.file} (pid ${pty.pid}, ${cols}x${rows})`,
     )
@@ -102,6 +119,7 @@ export class PtyBackend implements EditorBackend {
     })
     pty.onExit(({ exitCode }) => {
       this.#ptys.delete(pty)
+      remote?.close()
       console.error(`ah: ${command} exited (${exitCode})`)
       // The page restarts an editor that quit, not one hung up with the file
       const reason = this.#closed ? "file closed" : "editor exited"
@@ -119,6 +137,10 @@ export class PtyBackend implements EditorBackend {
         // clears and repaints everything on any resize event
         console.error(`ah: redraw requested by the page (${cols}x${rows})`)
         pty.kill("SIGWINCH")
+      } else if (msg?.type === "reveal" && remote) {
+        remote
+          .reveal(msg.line, msg.column, msg.row)
+          .catch((e: Error) => console.error("ah: couldn't reveal the line:", e.message))
       }
     })
     const hangup = () => {

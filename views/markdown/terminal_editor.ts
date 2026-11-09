@@ -8,8 +8,11 @@
 
 /** The command that opens `file` in the editor. It has to set the editor up
  * to keep to the rules in editor.ts: save soon after typing stops, and reload
- * or merge the agent's edits on disk. */
-export type TerminalCommand = (file: string) => Promise<{ command: string; args: string[] }>
+ * or merge the agent's edits on disk. `socket` is where it listens for RPC,
+ * for an editor that does (Neovim): the pty backend calls into it there. */
+export type TerminalCommand = (
+  file: string,
+) => Promise<{ command: string; args: string[]; socket?: string }>
 
 export interface TerminalEditor {
   /** Shown in the notice when the editor exits */
@@ -17,6 +20,10 @@ export interface TerminalEditor {
   /** ⌘-chords that go to the editor instead of the page, by key, as the
    * bytes to send. xterm.js doesn't encode ⌘ chords. */
   chords: Record<string, string>
+  /** "rpc" for an editor whose command gives a socket: the page asks the
+   * server to reveal a line there, and goto and lower go unused. Otherwise
+   * the page types goto and lower. */
+  reveal?: "rpc"
   /** Keys that put the cursor at `line` and `column` (0-based) from any mode,
    * with that line at the top of the view, or as near as the editor goes */
   goto(line: number, column: number): string
