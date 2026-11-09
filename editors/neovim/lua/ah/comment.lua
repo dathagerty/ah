@@ -69,23 +69,17 @@ local function target_first(listed)
   return vim.list_extend(sorted, vim.tbl_filter(function(a) return a.target ~= true end, listed))
 end
 
--- Which agent: with one, that one, named in the prompt; with several, the
--- one picked, which goes as --agent and becomes the pane's pick for later
--- comments, as in Helix. done(agent, id) with neither when there's no list,
--- and isn't called when the list is dismissed.
-local function choose(done)
-  agents(function(listed)
-    if #listed == 0 then return done(nil, nil) end
-    if #listed == 1 then return done(listed[1], nil) end
-    vim.ui.select(target_first(listed), { prompt = "Send to", format_item = agent_line }, function(agent)
-      if agent then done(agent, agent.id) end
-    end)
-  end)
-end
-
--- Saves before asking, so the agent reads the lines the comment is on, and
--- refuses when the file on disk didn't merge and so may not have them
-local function prompt(lines, selection)
+-- Opens the comment box (box.lua) by lines first to last of the current
+-- window, for a comment on `lines` (`12` or `12-20`, or nil for the whole
+-- file) with the selected text, if any.
+--
+-- Saves first, so the agent reads the lines the comment is on, and refuses
+-- when the file on disk didn't merge and so may not have them.
+--
+-- With one agent in the tab, the box's title names it. With several, it
+-- starts on the pane's pick and Tab changes it; the one shown goes as
+-- --agent, which makes it the pane's pick for later comments, as in Helix.
+local function prompt(first, last, lines, selection)
   local file = vim.api.nvim_buf_get_name(0)
   if file == "" or vim.bo.buftype ~= "" then
     vim.notify("ah: this buffer isn't a file", vim.log.levels.ERROR)
@@ -98,11 +92,19 @@ local function prompt(lines, selection)
     )
     return
   end
-  choose(function(agent, id)
-    local title = agent and ("Comment → " .. agent_line(agent) .. ": ") or "Comment: "
-    vim.ui.input({ prompt = title }, function(text)
-      if text and vim.trim(text) ~= "" then M.send(file, text, lines, selection, id) end
-    end)
+  local win = vim.api.nvim_get_current_win()
+  local name = vim.fn.fnamemodify(file, ":t")
+  agents(function(listed)
+    local sorted = target_first(listed)
+    require("ah.box").open({
+      win = win,
+      first = first,
+      last = last,
+      label = lines and (name .. ":" .. lines) or name,
+      agents = sorted,
+      line_of = agent_line,
+      send = function(text, agent) M.send(file, text, lines, selection, #sorted > 1 and agent.id or nil) end,
+    })
   end)
 end
 
@@ -114,7 +116,7 @@ end
 -- TODO(david): document comment_line, comment_selection and comment_file
 function M.comment_line()
   local line = vim.api.nvim_win_get_cursor(0)[1]
-  prompt(range(line, line))
+  prompt(line, line, range(line, line))
 end
 
 function M.comment_selection()
@@ -122,10 +124,14 @@ function M.comment_selection()
   local selection = table.concat(vim.fn.getregion(from, to, { type = vim.fn.mode() }), "\n")
   local first, last = math.min(from[2], to[2]), math.max(from[2], to[2])
   vim.api.nvim_feedkeys(vim.keycode("<Esc>"), "nx", false)
-  prompt(range(first, last), selection)
+  prompt(first, last, range(first, last), selection)
 end
 
-function M.comment_file() prompt(nil) end
+-- The box goes by the cursor's line
+function M.comment_file()
+  local line = vim.api.nvim_win_get_cursor(0)[1]
+  prompt(line, line, nil)
+end
 
 function M.setup(opts)
   cmd = opts.cmd
