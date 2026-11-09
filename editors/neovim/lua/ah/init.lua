@@ -9,11 +9,10 @@ local M = {}
 -- list, default { "ah" })
 function M.setup(opts)
   opts = opts or {}
+  local cmd = opts.cmd or { "ah" }
   local group = vim.api.nvim_create_augroup("ah", { clear = true })
-  require("ah.merge").setup(group, {
-    cmd = opts.cmd or { "ah" },
-    pane = (vim.env.AH_PANE or "") ~= "",
-  })
+  require("ah.merge").setup(group, { cmd = cmd, pane = (vim.env.AH_PANE or "") ~= "" })
+  require("ah.comment").setup({ cmd = cmd })
 end
 
 return M
