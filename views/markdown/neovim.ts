@@ -1,6 +1,7 @@
 // The page's half of Neovim as a terminal editor (terminal_editor.ts), with
-// its name and keys. The server's half is neovim_command.ts. Nothing uses
-// either; see there.
+// its name and keys: the editor the pane runs, picked in client.ts. The
+// server's half is neovim_command.ts, and the Lua it loads is
+// editors/neovim/.
 
 import type { TerminalEditor } from "./terminal_editor.ts"
 

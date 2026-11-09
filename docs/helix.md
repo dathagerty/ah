@@ -1,6 +1,8 @@
 # Helix setup
 
-`ah` is not tied to Helix in any deep way. To use another editor in the markdown editor, or none, see [Swapping out Helix](other-editors.md). `ah`'s Helix integration is written in Steel, the [plugin system](https://github.com/helix-editor/helix/pull/8675) that isn't in Helix's master branch yet, so you'll need to build a branch of Helix from source. After that, it's a symlink and a few lines of config.
+`ah` is not tied to Helix in any deep way. To use another editor in the markdown editor, or none, see [Swapping out the editor](other-editors.md). `ah`'s Helix integration is written in Steel, the [plugin system](https://github.com/helix-editor/helix/pull/8675) that isn't in Helix's master branch yet, so you'll need to build a branch of Helix from source. After that, it's a symlink and a few lines of config.
+
+The markdown editor's pane runs Neovim ([neovim.md](neovim.md)); what this says about the Helix pane applies once you switch it back to Helix ([Swapping out the editor](other-editors.md)). The comment commands work in any Helix either way.
 
 `ah` uses Helix in two places:
 

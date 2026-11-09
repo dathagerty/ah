@@ -1,10 +1,10 @@
 // What the editor pane's terminal (editor.ts) needs from the editor running
 // in it, for the pty backend (pty.ts) and the terminal pane
-// (terminal_pane.ts). The pane runs Helix (helix_command.ts on the server,
-// helix.ts in the page), picked in files.ts and client.ts. Neovim
-// (neovim_command.ts, neovim.ts) is an example of another; nothing uses it.
-// Each editor's two halves are separate files because the page's half is
-// bundled for the browser.
+// (terminal_pane.ts). The pane runs Neovim (neovim_command.ts on the server,
+// neovim.ts in the page), picked in files.ts and client.ts. Helix
+// (helix_command.ts, helix.ts) is the other one ah has; swapping those two
+// imports back runs it. Each editor's two halves are separate files because
+// the page's half is bundled for the browser.
 
 /** The command that opens `file` in the editor. It has to set the editor up
  * to keep to the rules in editor.ts: save soon after typing stops, and reload

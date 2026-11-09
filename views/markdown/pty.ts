@@ -115,8 +115,8 @@ export class PtyBackend implements EditorBackend {
         ;({ cols, rows } = msg)
         pty.resize(Math.max(20, cols), Math.max(5, rows))
       } else if (msg?.type === "redraw") {
-        // A same-size resize raises no SIGWINCH, so send one: helix clears
-        // and repaints everything on any resize event
+        // A same-size resize raises no SIGWINCH, so send one: the editor
+        // clears and repaints everything on any resize event
         console.error(`ah: redraw requested by the page (${cols}x${rows})`)
         pty.kill("SIGWINCH")
       }

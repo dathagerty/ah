@@ -321,7 +321,7 @@ ${chat ? chatStylesheet : ""}
   }
   #find-count { min-width: 3em; text-align: right; font-variant-numeric: tabular-nums; }
   /* Its marks sit over the text, see-through so the text shows. (Blending
-     them with the text instead fails in WebKit once the helix pane's canvas
+     them with the text instead fails in WebKit once the editor pane's canvas
      is on the page.) */
   #find-marks { position: absolute; top: 0; left: 0; z-index: 1; pointer-events: none; }
   #find-marks > div {

@@ -7,9 +7,9 @@
 //   like on it. One pair is a terminal (pty.ts and terminal_pane.ts). The
 //   other is CodeMirror, running in the page (codemirror_backend.ts and
 //   codemirror_pane.ts), an example that nothing uses.
-// - Which editor runs in that terminal: terminal_editor.ts, with Helix
-//   (helix.ts and helix_command.ts) as the one in use and Neovim as an
-//   example.
+// - Which editor runs in that terminal: terminal_editor.ts, with Neovim
+//   (neovim.ts and neovim_command.ts) as the one in use and Helix (helix.ts
+//   and helix_command.ts) as the other.
 //
 // Both are chosen in files.ts (the backend) and client.ts (the pane).
 //
@@ -23,15 +23,16 @@
 //   merge the file on disk into the unsaved text: a three-way merge against
 //   the last save, word by word, marking only the text both changed
 //   (merge.ts). The CodeMirror pane runs it in the page, and terminal editors
-//   call the server's merge route (routes.ts), Helix from
-//   editors/helix/auto-merge.scm.
+//   run `ah view merge`: Neovim from editors/neovim/lua/ah/merge.lua, Helix
+//   from editors/helix/auto-merge.scm.
 //
 // A page-side editor has the file's text already: the doc socket pushes it on
 // every change (doc.ts), and the preview element holds it (preview.ts).
 //
 // Comments from the editor to an agent are separate. The preview's selection
-// comments work with any editor, and Helix's own are Steel commands in
-// editors/helix/ that run `ah message send`.
+// comments work with any editor. Neovim's own are in
+// editors/neovim/lua/ah/comment.lua, and Helix's are Steel commands in
+// editors/helix/; both run `ah message send`.
 
 import type { WebSocket } from "ws"
 

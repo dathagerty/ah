@@ -125,8 +125,9 @@ export class TerminalPane implements EditorPane {
     const fit = new FitAddon()
     term.loadAddon(fit)
     term.open(host)
-    // The default DOM renderer can't keep up with helix's full-viewport
-    // redraws (holding k scrolled several times slower than in a terminal).
+    // The default DOM renderer can't keep up with a full-screen editor's
+    // full-viewport redraws (in Helix, holding k scrolled several times
+    // slower than in a terminal).
     // WebGL renders the same output at terminal speed; if the context is lost
     // or unavailable, dispose the addon and xterm falls back to the DOM renderer.
     try {
@@ -202,20 +203,21 @@ export class TerminalPane implements EditorPane {
       host.addEventListener("click", () => this.#restart(), { once: true })
     }
     term.onData(type)
-    // Spawn counts as a resize: switching to the alternate screen, which helix
-    // does at startup, also fires xterm's scroll event.
+    // Spawn counts as a resize: switching to the alternate screen, which the
+    // editor does at startup, also fires xterm's scroll event.
     let lastResizeAt = Date.now()
     term.onResize(() => {
       lastResizeAt = Date.now()
       sendSize()
     })
-    // Helix positions the cursor before every write and never wraps or line
-    // feeds, so the alternate screen should never scroll. When it does, helix
-    // and xterm disagree about the size (or a glyph width) and every row is
-    // off by one until helix happens to rewrite it. Ask helix for a full
-    // redraw, which it does on any resize event. Around a resize this is
-    // expected and self-correcting: frames drawn for the old size land after
-    // xterm shrank, and helix's redraw for the new size repairs them. Outside
+    // A full-screen editor draws the alternate screen by positioning the
+    // cursor (Helix, where this was worked out, does before every write and
+    // never wraps or line feeds), so it should never scroll. When it does,
+    // the editor and xterm disagree about the size (or a glyph width) and
+    // every row is off by one until the editor happens to rewrite it. Ask it
+    // for a full redraw, which it does on any resize event. Around a resize
+    // this is expected and self-correcting: frames drawn for the old size
+    // land after xterm shrank, and the redraw for the new size repairs them. Outside
     // that window it is an anomaly, so leave a trace in the console. Capped so
     // a persistent disagreement can't turn into a redraw loop.
     const redraws: number[] = []

@@ -4,14 +4,14 @@
 
 `ah` runs on macOS and requires Node 24 or newer and either Claude Code, Codex, or OpenCode. The tools below are needed for particular features; you can skip those features or swap in your own tools.
 
-| Dependency                                                           | Used for                                                    | Skipping or replacing it                                                                                                                                                             |
-| -------------------------------------------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| [Rex](https://www.superlogical.com/updates/public-testing-beginning) | Dashboard, tab titles, and finding agents in terminal tabs. | Pages opened directly by an agent work without Rex. Supporting another terminal or multiplexer takes new integration code.                                                           |
-| Xcode Command Line Tools                                             | Native windows.                                             | Optional for file views: pass `--in tab` to open in a browser tab and skip building the native window app.                                                                           |
-| jj                                                                   | Dashboard workspace discovery and commit log.               | File views work without it. Replacing it with git requires reworking the dashboard's workspace and log queries.                                                                      |
-| [Helix with Steel](helix.md)                                         | The embedded Helix editor and its comment commands.         | Optional. `--no-editor` keeps the preview and commenting working, or you can switch the editor pane to the included CodeMirror or Neovim sample adapters; see [Helix](#helix) below. |
-| skepsis and jq                                                       | Diff review.                                                | Optional. Another diff viewer can be connected by having it call `ah message send`. The [skepsis skill](../skills/skepsis/SKILL.md) needs the path to your local checkout.           |
-| An LLM CLI                                                           | Tab-title summaries for Claude Code and Codex.              | Optional. Without it, tab titles fall back to the directory name. Easy to swap for another command ([Tab titles](#tab-titles)); OpenCode generates its own summaries.                |
+| Dependency                                                           | Used for                                                             | Skipping or replacing it                                                                                                                                                                       |
+| -------------------------------------------------------------------- | -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [Rex](https://www.superlogical.com/updates/public-testing-beginning) | Dashboard, tab titles, and finding agents in terminal tabs.          | Pages opened directly by an agent work without Rex. Supporting another terminal or multiplexer takes new integration code.                                                                     |
+| Xcode Command Line Tools                                             | Native windows.                                                      | Optional for file views: pass `--in tab` to open in a browser tab and skip building the native window app.                                                                                     |
+| jj                                                                   | Dashboard workspace discovery and commit log.                        | File views work without it. Replacing it with git requires reworking the dashboard's workspace and log queries.                                                                                |
+| [Neovim](neovim.md)                                                  | The embedded editor pane, and merging and comments in your own nvim. | Optional. `--no-editor` keeps the preview and commenting working, or you can switch the editor pane to Helix or the included CodeMirror sample adapter; see [Editor pane](#editor-pane) below. |
+| skepsis and jq                                                       | Diff review.                                                         | Optional. Another diff viewer can be connected by having it call `ah message send`. The [skepsis skill](../skills/skepsis/SKILL.md) needs the path to your local checkout.                     |
+| An LLM CLI                                                           | Tab-title summaries for Claude Code and Codex.                       | Optional. Without it, tab titles fall back to the directory name. Easy to swap for another command ([Tab titles](#tab-titles)); OpenCode generates its own summaries.                          |
 
 ## Installation
 
@@ -45,9 +45,9 @@ Codex fires `SessionStart` on the first prompt rather than at launch, so a Codex
 
 `skills/` contains agent-facing instructions for using the `ah` tools (`markdown`, `html`, `tracker`, and `skepsis`) and for opening panes with `rex split`. Copy or symlink them into your harness's skills directory.
 
-## Helix
+## Editor pane
 
-The editor pane runs the `hx` on your `PATH`. Any Helix works, but sending comments from Helix and auto-reloading when the agent changes files on disk need the Steel fork; see [helix.md](helix.md) for more on that. To use the included CodeMirror or Neovim adapters instead, or no editor pane, see [Swapping out Helix](other-editors.md).
+The editor pane runs the `nvim` on your `PATH` with `ah`'s plugin, which auto-saves and takes the agent's edits; see [neovim.md](neovim.md), which also covers loading the plugin in your own nvim. To use Helix, the included CodeMirror adapter, or no editor pane, see [Swapping out the editor](other-editors.md).
 
 ## Tab titles
 
