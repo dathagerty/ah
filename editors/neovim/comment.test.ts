@@ -4,12 +4,19 @@ import { hasNvim, inNvim, repoAh } from "./testing.ts"
 // An ah that writes what it was run with to $AH_FAKE_OUT, as JSON, with the
 // --file as it was on disk then (what the agent would read), and prints
 // `sent` as `ah message send` does. Merges (`view merge`) go to the repo's
-// ah, or fail with $AH_FAKE_MERGE_FAILS set.
+// ah, or fail with $AH_FAKE_MERGE_FAILS set. `workspace agents` lists
+// $AH_FAKE_AGENTS (a JSON array), one per line, or fails with "fail".
 const FAKE_AH = [
   process.execPath,
   "-e",
   `const fs = require("fs")
    const args = process.argv.slice(1)
+   if (args[0] === "workspace") {
+     const agents = process.env.AH_FAKE_AGENTS
+     if (agents === "fail") process.exit(1)
+     for (const agent of JSON.parse(agents || "[]")) console.log(JSON.stringify(agent))
+     process.exit(0)
+   }
    const stdin = fs.readFileSync(0, "utf8")
    if (args[0] === "view" && process.env.AH_FAKE_MERGE_FAILS) process.exit(1)
    if (args[0] === "view") {
@@ -24,19 +31,69 @@ const FAKE_AH = [
   "--",
 ]
 
+interface Agents {
+  /** What `ah workspace agents` lists, or "fail" */
+  agents?: Agent[] | "fail"
+  /** The list item to pick (1-based) when asked which agent, or none to
+   * dismiss the list */
+  choose?: number
+}
+
+interface Agent {
+  id: string
+  harness: string
+  label: string
+  summary: string | null
+  busy: boolean
+  target: boolean
+}
+
 /** Lua that sets the plugin up with the fake ah, leader as space, and the
- * comment prompt answered with `answer` */
-function setup(answer: string) {
+ * comment prompt answered with `answer`. Records whether the prompt was
+ * shown (`asked`) and with what (`prompt`), and the agent list's items as
+ * shown (`listed`). */
+function setup(answer: string, { agents, choose }: Agents = {}) {
   return `
     vim.g.mapleader = " "
     vim.env.AH_FAKE_OUT = vim.fs.dirname(file) .. "/sent.json"
+    vim.env.AH_FAKE_AGENTS = ${JSON.stringify(agents === "fail" ? "fail" : JSON.stringify(agents ?? []))}
     require("ah").setup({ cmd = vim.json.decode(${JSON.stringify(JSON.stringify(FAKE_AH))}) })
-    asked = false
-    vim.ui.input = function(_, done)
-      asked = true
+    asked, prompt, listed = false, vim.NIL, vim.NIL
+    vim.ui.input = function(opts, done)
+      asked, prompt = true, opts.prompt
       done(${JSON.stringify(answer)})
     end
+    vim.ui.select = function(items, opts, done)
+      listed = vim.tbl_map(opts.format_item or tostring, items)
+      local i = ${choose ?? "nil"}
+      done(i and items[i], i)
+    end
   `
+}
+
+const agentA: Agent = {
+  id: "block:a",
+  harness: "claude",
+  label: "~/code/a",
+  summary: "fixing login",
+  busy: false,
+  target: false,
+}
+const agentB: Agent = {
+  id: "block:b",
+  harness: "codex",
+  label: "~/code/b",
+  summary: "tests",
+  busy: true,
+  target: true,
+}
+const agentC: Agent = {
+  id: "block:c",
+  harness: "opencode",
+  label: "~/code/c",
+  summary: null,
+  busy: false,
+  target: false,
 }
 
 /** Lua that waits for the fake ah to run, then returns what it got, the
@@ -219,6 +276,95 @@ describe.skipIf(!hasNvim).concurrent("commenting to the agent", () => {
       args: ["message", "send", "--file", result.file, "--lines=1"],
       stdin: "fix this",
       disk: "oneX\ntwo\nthree\n",
+    })
+  })
+})
+
+/** Lua that comments on line 1 and returns the prompt, the agent list as
+ * shown, and the arguments ah got, if it got any */
+const PICK = `
+  vim.cmd.edit(file)
+  keys(" ac")
+  wait_for(function() return read(vim.env.AH_FAKE_OUT) end, 1500)
+  local sent = read(vim.env.AH_FAKE_OUT)
+  return {
+    prompt = prompt,
+    listed = listed,
+    args = sent and vim.json.decode(sent).args or vim.NIL,
+    file = vim.api.nvim_buf_get_name(0),
+  }
+`
+
+interface Picked {
+  prompt: string | null
+  listed: string[] | null
+  args: string[] | null
+  file: string
+}
+
+describe.skipIf(!hasNvim).concurrent("picking the agent", () => {
+  test("with none listed, as outside Rex, sends without asking which", async () => {
+    const result = await inNvim<Picked>({
+      file: "one\n",
+      lua: `${setup("fix this")} ${PICK}`,
+    })
+    expect(result).toEqual({
+      prompt: "Comment: ",
+      listed: null,
+      args: ["message", "send", "--file", result.file, "--lines=1"],
+      file: result.file,
+    })
+  })
+
+  test("with one, names it in the prompt and sends without asking which", async () => {
+    const result = await inNvim<Picked>({
+      file: "one\n",
+      lua: `${setup("fix this", { agents: [agentA] })} ${PICK}`,
+    })
+    expect(result).toEqual({
+      prompt: "Comment → ~/code/a | fixing login (claude): ",
+      listed: null,
+      args: ["message", "send", "--file", result.file, "--lines=1"],
+      file: result.file,
+    })
+  })
+
+  test("with several, asks which, the pane's pick first, and sends to it", async () => {
+    const result = await inNvim<Picked>({
+      file: "one\n",
+      lua: `${setup("fix this", { agents: [agentA, agentB, agentC], choose: 2 })} ${PICK}`,
+    })
+    expect(result).toEqual({
+      prompt: "Comment → ~/code/a | fixing login (claude): ",
+      listed: [
+        "~/code/b | tests (codex, working)",
+        "~/code/a | fixing login (claude)",
+        "~/code/c (opencode)",
+      ],
+      args: ["message", "send", "--file", result.file, "--lines=1", "--agent", "block:a"],
+      file: result.file,
+    })
+  })
+
+  test("dismissing the list sends nothing", async () => {
+    const result = await inNvim<Picked>({
+      file: "one\n",
+      lua: `${setup("fix this", { agents: [agentA, agentB] })} ${PICK}`,
+    })
+    expect(result).toMatchObject({ prompt: null, args: null })
+    expect(result.listed).toHaveLength(2)
+  })
+
+  test("when listing them fails, sends without asking which", async () => {
+    const result = await inNvim<Picked>({
+      file: "one\n",
+      lua: `${setup("fix this", { agents: "fail" })} ${PICK}`,
+    })
+    expect(result).toEqual({
+      prompt: "Comment: ",
+      listed: null,
+      args: ["message", "send", "--file", result.file, "--lines=1"],
+      file: result.file,
     })
   })
 })
