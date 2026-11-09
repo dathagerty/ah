@@ -21,13 +21,60 @@ local function report(done)
   end
 end
 
--- TODO(david): document send(file, text, lines, selection)
-function M.send(file, text, lines, selection)
+-- TODO(david): document send(file, text, lines, selection, agent)
+function M.send(file, text, lines, selection, agent)
   local args = vim.list_extend(vim.list_slice(cmd), { "message", "send", "--file", file })
   if lines then table.insert(args, "--lines=" .. lines) end
   if selection and selection ~= "" then table.insert(args, "--selection=" .. selection) end
+  if agent then vim.list_extend(args, { "--agent", agent }) end
   local ok, err = pcall(vim.system, args, { stdin = text, text = true }, vim.schedule_wrap(report))
   if not ok then vim.notify("ah: couldn't run ah: " .. tostring(err), vim.log.levels.ERROR) end
+end
+
+-- An agent as ah's terminal picker shows it: its part of the tab's title,
+-- then its harness. A JSON null summary decodes to vim.NIL, so a missing one
+-- is told by its type.
+local function agent_line(agent)
+  local summary = type(agent.summary) == "string" and (" | " .. agent.summary) or ""
+  return agent.label .. summary .. " (" .. agent.harness .. (agent.busy and ", working" or "") .. ")"
+end
+
+-- The agents a comment from this pane can go to (`ah workspace agents`), to
+-- done, back in the editor. None outside Rex, and none if listing them
+-- failed, when `ah message send` picks as it does without --agent.
+local function agents(done)
+  local args = vim.list_extend(vim.list_slice(cmd), { "workspace", "agents" })
+  local ok = pcall(vim.system, args, { text = true }, vim.schedule_wrap(function(result)
+    local listed = {}
+    if result.code == 0 then
+      for line in vim.gsplit(result.stdout or "", "\n", { trimempty = true }) do
+        local parsed, agent = pcall(vim.json.decode, line)
+        if parsed and type(agent) == "table" then table.insert(listed, agent) end
+      end
+    end
+    done(listed)
+  end))
+  if not ok then done({}) end
+end
+
+-- The pane's pick first, so the list starts on it; the rest in layout order
+local function target_first(listed)
+  local sorted = vim.tbl_filter(function(a) return a.target == true end, listed)
+  return vim.list_extend(sorted, vim.tbl_filter(function(a) return a.target ~= true end, listed))
+end
+
+-- Which agent: with one, that one, named in the prompt; with several, the
+-- one picked, which goes as --agent and becomes the pane's pick for later
+-- comments, as in Helix. done(agent, id) with neither when there's no list,
+-- and isn't called when the list is dismissed.
+local function choose(done)
+  agents(function(listed)
+    if #listed == 0 then return done(nil, nil) end
+    if #listed == 1 then return done(listed[1], nil) end
+    vim.ui.select(target_first(listed), { prompt = "Send to", format_item = agent_line }, function(agent)
+      if agent then done(agent, agent.id) end
+    end)
+  end)
 end
 
 -- Saves before asking, so the agent reads the lines the comment is on, and
@@ -45,8 +92,11 @@ local function prompt(lines, selection)
     )
     return
   end
-  vim.ui.input({ prompt = "Comment: " }, function(text)
-    if text and vim.trim(text) ~= "" then M.send(file, text, lines, selection) end
+  choose(function(agent, id)
+    local title = agent and ("Comment → " .. agent_line(agent) .. ": ") or "Comment: "
+    vim.ui.input({ prompt = title }, function(text)
+      if text and vim.trim(text) ~= "" then M.send(file, text, lines, selection, id) end
+    end)
   end)
 end
 
