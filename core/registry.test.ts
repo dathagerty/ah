@@ -3,7 +3,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, expect, test } from "vitest"
 import { tabTitle } from "./tabtitle/title.ts"
-import { abbreviatePath, hookEvent } from "./hook.ts"
+import { abbreviatePath, editorEvent, hookEvent } from "./hook.ts"
 import {
   agentId,
   apply,
@@ -259,6 +259,84 @@ test("loading drops entries that aren't the right shape", () => {
   expect(loadRegistry(file)).toEqual(r)
   writeFileSync(file, "[]")
   expect(loadRegistry(file)).toBeNull()
+})
+
+const editor = (event: "start" | "end", block: string, socket: string): RegistryEvent => ({
+  kind: "editor",
+  event,
+  block,
+  socket,
+})
+
+test("an nvim starting in a pane is that pane's editor, until it ends", () => {
+  const r = emptyRegistry()
+  expect(apply(r, editor("start", "t1", "/tmp/nvim.1/0"))).toEqual({
+    agent: null,
+    blocks: [],
+    summarize: null,
+  })
+  apply(r, editor("start", "t2", "/tmp/nvim.2/0"))
+  expect(Object.fromEntries(r.editors)).toEqual({
+    t1: { socket: "/tmp/nvim.1/0" },
+    t2: { socket: "/tmp/nvim.2/0" },
+  })
+  apply(r, editor("end", "t1", "/tmp/nvim.1/0"))
+  expect([...r.editors.keys()]).toEqual(["t2"])
+})
+
+test("a later nvim in the pane takes over, and an earlier one ending leaves it", () => {
+  const r = emptyRegistry()
+  apply(r, editor("start", "t1", "/tmp/nvim.1/0"))
+  apply(r, editor("start", "t1", "/tmp/nvim.3/0"))
+  apply(r, editor("end", "t1", "/tmp/nvim.1/0"))
+  expect(r.editors.get("t1")).toEqual({ socket: "/tmp/nvim.3/0" })
+})
+
+test("prune drops the editors of closed panes and of sockets that are gone", () => {
+  const r = emptyRegistry()
+  apply(r, editor("start", "t1", "/tmp/nvim.1/0"))
+  apply(r, editor("start", "t2", "/tmp/nvim.2/0"))
+  apply(r, editor("start", "t3", "/tmp/nvim.3/0"))
+  const exists = (path: string) => path !== "/tmp/nvim.2/0"
+  expect(prune(r, live(["t1", "t2"]), new Set(), 0, undefined, exists)).toBe(true)
+  expect([...r.editors.keys()]).toEqual(["t1"])
+  // Without Rex, only the sockets count
+  apply(r, editor("start", "t4", "/tmp/nvim.2/0"))
+  expect(prune(r, null, new Set(), 0, undefined, exists)).toBe(true)
+  expect([...r.editors.keys()]).toEqual(["t1"])
+  expect(prune(r, null, new Set(), 0, undefined, exists)).toBe(false)
+})
+
+test("editors are saved and loaded, and bad ones dropped", () => {
+  const dir = mkdtempSync(join(tmpdir(), "registry-"))
+  dirs.push(dir)
+  const file = join(dir, "s.json")
+  const r = emptyRegistry()
+  apply(r, editor("start", "t1", "/tmp/nvim.1/0"))
+  saveRegistry(r, file)
+  expect(loadRegistry(file)).toEqual(r)
+  const stored = JSON.parse(readFileSync(file, "utf8"))
+  stored.editors.t2 = { socket: 7 }
+  writeFileSync(file, JSON.stringify(stored))
+  expect(loadRegistry(file)?.editors).toEqual(r.editors)
+  // A registry saved before there were editors loads with none
+  delete stored.editors
+  writeFileSync(file, JSON.stringify(stored))
+  expect(loadRegistry(file)?.editors).toEqual(new Map())
+})
+
+test("editorEvent is the pane's nvim starting or ending, only in a Rex pane", () => {
+  expect(editorEvent("start", "/tmp/nvim.1/0", { REX_BLOCK: "t1" })).toEqual({
+    kind: "editor",
+    event: "start",
+    block: "t1",
+    socket: "/tmp/nvim.1/0",
+  })
+  expect(editorEvent("end", "/tmp/nvim.1/0", { REX_BLOCK: "t1" })).toMatchObject({
+    event: "end",
+  })
+  expect(editorEvent("start", "/tmp/nvim.1/0", {})).toBeNull()
+  expect(editorEvent("start", "", { REX_BLOCK: "t1" })).toBeNull()
 })
 
 test("hookEvent reads the hook's JSON and the shell's env", () => {

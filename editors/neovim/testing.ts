@@ -99,8 +99,10 @@ export async function inNvim<T = Record<string, unknown>>(run: NvimRun): Promise
     await writeFile(join(dir, "test.lua"), run.lua)
     await writeFile(join(dir, "driver.lua"), DRIVER)
     const out = join(dir, "out.json")
-    // Not in the pane unless the test says so, even when the tests run in one
-    const { AH_PANE: _, ...outer } = process.env
+    // Not in the pane, or in a Rex pane, unless the test says so, even when
+    // the tests run in one: in a Rex pane the plugin tells the running ah
+    // server about the nvim
+    const { AH_PANE: _, REX_BLOCK: _block, REX_SESSION: _session, ...outer } = process.env
     const env = {
       ...outer,
       ...run.env,

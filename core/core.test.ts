@@ -4,7 +4,7 @@ import { join } from "node:path"
 import { afterEach, beforeEach, expect, test, vi } from "vitest"
 import type { Address, RexState } from "./model.ts"
 import { emptyRegistry, type RegistryEvent } from "./registry.ts"
-import { Core, RELAYED } from "./core.ts"
+import { Core, parseEvent, RELAYED } from "./core.ts"
 
 /** What `ah message send` posted, and whether posts fail, as when the agent's
  * session is gone */
@@ -366,4 +366,13 @@ test("hooks tell the agent its trackers, then what changed", async () => {
     `ah: the dashboard now shows ${a} as this workspace's current tracker`,
   )
   expect(await context(hook("UserPromptSubmit"))).toBeNull()
+})
+
+test("parseEvent takes an nvim starting or ending in a pane", () => {
+  const event = { kind: "editor", event: "start", block: "t1", socket: "/tmp/nvim.1/0" }
+  expect(parseEvent(event)).toEqual(event)
+  expect(parseEvent({ ...event, event: "end" })).toEqual({ ...event, event: "end" })
+  expect(parseEvent({ ...event, event: "restart" })).toBeNull()
+  expect(parseEvent({ ...event, block: null })).toBeNull()
+  expect(parseEvent({ ...event, socket: "" })).toBeNull()
 })
