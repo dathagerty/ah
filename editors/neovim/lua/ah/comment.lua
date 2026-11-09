@@ -9,6 +9,10 @@ local M = {}
 -- How to run ah, from setup
 local cmd = { "ah" }
 
+-- The selected text goes as an argument, so it's cut to this many
+-- characters, as in Helix, to stay well under the argument size limit
+local MAX_SELECTION = 4000
+
 local function report(done)
   local out = vim.trim(done.stdout or "")
   if vim.startswith(out, "sent") then
@@ -25,7 +29,9 @@ end
 function M.send(file, text, lines, selection, agent)
   local args = vim.list_extend(vim.list_slice(cmd), { "message", "send", "--file", file })
   if lines then table.insert(args, "--lines=" .. lines) end
-  if selection and selection ~= "" then table.insert(args, "--selection=" .. selection) end
+  if selection and selection ~= "" then
+    table.insert(args, "--selection=" .. vim.fn.strcharpart(selection, 0, MAX_SELECTION))
+  end
   if agent then vim.list_extend(args, { "--agent", agent }) end
   local ok, err = pcall(vim.system, args, { stdin = text, text = true }, vim.schedule_wrap(report))
   if not ok then vim.notify("ah: couldn't run ah: " .. tostring(err), vim.log.levels.ERROR) end
