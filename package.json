@@ -12,6 +12,7 @@
     "dist",
     "views/**/*.css",
     "views/dashboard/page.html",
+    "editors/neovim/lua",
     "webview/main.swift",
     "webview/Info.plist",
     "webview/build.sh"
