@@ -22,6 +22,19 @@ test("parsePtyMessage takes only the messages the pane sends", () => {
   expect(parsePtyMessage("{")).toEqual(null)
 })
 
+test("parsePtyMessage takes a reveal with a whole line, column and row", () => {
+  expect(parsePtyMessage('{"type":"reveal","line":49,"column":3,"row":5}')).toEqual({
+    type: "reveal",
+    line: 49,
+    column: 3,
+    row: 5,
+  })
+  expect(parsePtyMessage('{"type":"reveal","line":49,"column":3}')).toEqual(null)
+  expect(parsePtyMessage('{"type":"reveal","line":"49","column":3,"row":5}')).toEqual(null)
+  expect(parsePtyMessage('{"type":"reveal","line":-1,"column":3,"row":5}')).toEqual(null)
+  expect(parsePtyMessage('{"type":"reveal","line":4.5,"column":3,"row":5}')).toEqual(null)
+})
+
 test("a pane asked for after the file closed never starts the editor", async () => {
   const dir = mkdtempSync(join(tmpdir(), "ah-pty-"))
   const file = join(dir, "notes.md")
