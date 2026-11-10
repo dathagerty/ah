@@ -28,6 +28,7 @@ import { dirname, isAbsolute, join } from "node:path"
 import { NvimRemote } from "../editors/neovim/remote.ts"
 import { isOneOf, isRecord, isString, str } from "../platform/guards.ts"
 import { focusBlock, selectTab } from "../platform/rex.ts"
+import type { QuickfixItem } from "./quickfix.ts"
 import type { AgentDirectory } from "../subjects/files/files.ts"
 import {
   addressAlive,
@@ -72,6 +73,29 @@ import { buildSummaryPayload, generateSummary } from "./summary.ts"
 
 /** In a block that still exists, or running */
 export const isCurrent = (a: AgentView) => a.tab !== null || a.process !== null
+
+/** A posted `ah edit --quickfix`, checked: a title, and items with absolute
+ * files, lines and columns from 1, and text */
+function parseQuickfixBody(
+  o: unknown,
+): { block: BlockId; title: string; items: QuickfixItem[]; focus: boolean } | null {
+  if (!isRecord(o)) return null
+  const block = str(o.block)
+  const title = str(o.title)
+  const { items, focus } = o
+  if (!block || !title || typeof focus !== "boolean" || !Array.isArray(items)) return null
+  const line = (n: unknown) => Number.isInteger(n) && (n as number) >= 1
+  const ok = items.every(
+    (i) =>
+      isRecord(i) &&
+      isString(i.file) &&
+      isAbsolute(i.file) &&
+      line(i.line) &&
+      line(i.col) &&
+      isString(i.text),
+  )
+  return ok ? { block, title, items: items as QuickfixItem[], focus } : null
+}
 
 /** A posted `ah edit`, checked: absolute files, maybe none, and a line from
  * 1 or null */
@@ -355,6 +379,40 @@ export class Core implements AgentDirectory {
     line: number | null,
     focus: boolean,
   ): Promise<boolean> {
+    return await this.#inTabEditor(block, focus, async (remote) => {
+      // With no files there's nothing to send, but focusing a pane nvim
+      // isn't in would be worse than a fresh nvim
+      if (!files.length) await remote.ping()
+      // The line is for the first file, as nvim's +line is
+      for (const [i, file] of files.entries())
+        await remote.open(file, i === 0 ? (line ?? 1) : 1)
+    })
+  }
+
+  // TODO(david): document quickfix(block, title, items, focus): a titled list
+  // in the nvim of block's tab, as `ah edit --quickfix` fills it; false when
+  // the tab has none
+  async quickfix(
+    block: BlockId,
+    title: string,
+    items: QuickfixItem[],
+    focus: boolean,
+  ): Promise<boolean> {
+    // Opened only with the focus: otherwise the layout stays, and a notice
+    // says what came
+    return await this.#inTabEditor(block, focus, (remote) =>
+      remote.quickfix(title, items, focus),
+    )
+  }
+
+  /** `use` on the nvim of `block`'s tab (tabEditor), then that pane focused
+   * if `focus`. False when the tab has none, or it can't be reached, which
+   * it then forgets. */
+  async #inTabEditor(
+    block: BlockId,
+    focus: boolean,
+    use: (remote: NvimRemote) => Promise<void>,
+  ): Promise<boolean> {
     const session = this.#rex?.sessions.find((s) =>
       s.tabs.some((t) => t.blocks.some((b) => b.id === block)),
     )
@@ -368,12 +426,7 @@ export class Core implements AgentDirectory {
     // It said it started, so it should be listening now
     const remote = new NvimRemote(editor.socket, { waitMs: 0 })
     try {
-      // With no files there's nothing to send, but focusing a pane nvim
-      // isn't in would be worse than a fresh nvim
-      if (!files.length) await remote.ping()
-      // The line is for the first file, as nvim's +line is
-      for (const [i, file] of files.entries())
-        await remote.open(file, i === 0 ? (line ?? 1) : 1)
+      await use(remote)
     } catch (e) {
       console.error(`ah: couldn't reach the tab's nvim at ${editor.socket}:`, e)
       // As if it said it ended, in order with the other events
@@ -383,7 +436,7 @@ export class Core implements AgentDirectory {
       remote.close()
     }
     if (focus) {
-      // It's open either way; these only bring it to the front
+      // It's done either way; these only bring it to the front
       await selectTab(session.id, tab.id).catch((e) => console.error("ah:", e))
       await focusBlock(session.id, editor.block).catch((e) => console.error("ah:", e))
     }
@@ -676,6 +729,16 @@ export class Core implements AgentDirectory {
       if (!edit) return new Response("bad edit", { status: 400 })
       return Response.json({
         opened: await this.edit(edit.block, edit.files, edit.line, edit.focus),
+      })
+    }
+    if (rest === "quickfix" && req.method === "POST") {
+      // { block, title, items, focus }: `ah edit --quickfix` from a pane in
+      // the tab
+      const body: unknown = await req.json().catch(() => null)
+      const list = parseQuickfixBody(body)
+      if (!list) return new Response("bad quickfix list", { status: 400 })
+      return Response.json({
+        shown: await this.quickfix(list.block, list.title, list.items, list.focus),
       })
     }
     if (rest === "agents-near" && req.method === "GET") {

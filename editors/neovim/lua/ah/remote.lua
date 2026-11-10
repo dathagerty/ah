@@ -59,4 +59,33 @@ function M.open(path, line)
   vim.cmd("normal! zz")
 end
 
+-- TODO(david): document quickfix(title, items, open): `ah edit --quickfix`,
+-- items as { file, line, col, text }, 1-based
+function M.quickfix(title, items, open)
+  local entries = vim.tbl_map(function(item)
+    return { filename = item.file, lnum = item.line, col = item.col, text = item.text }
+  end, items)
+  -- The list with this title, if the stack has one, is filled again in place,
+  -- so asking twice doesn't pile up lists
+  local found
+  for nr = 1, vim.fn.getqflist({ nr = "$" }).nr do
+    if vim.fn.getqflist({ nr = nr, title = 1 }).title == title then
+      found = nr
+      break
+    end
+  end
+  if found then
+    vim.fn.setqflist({}, "r", { nr = found, title = title, items = entries })
+    -- Current, so ]q steps through it
+    vim.cmd("silent " .. found .. "chistory")
+  else
+    vim.fn.setqflist({}, " ", { title = title, items = entries })
+  end
+  if open then
+    vim.cmd("copen")
+  else
+    vim.notify(("ah: %d in '%s' (:copen)"):format(#entries, title))
+  end
+end
+
 return M

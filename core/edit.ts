@@ -10,6 +10,7 @@ import { Command } from "@commander-js/extra-typings"
 import { spawn } from "node:child_process"
 import { resolve } from "node:path"
 import { portOption } from "../platform/cli.ts"
+import { parseQuickfix } from "./quickfix.ts"
 
 // TODO(david): document parseEditArgs(argv, cwd)
 export function parseEditArgs(
@@ -51,26 +52,49 @@ export function editPlan(
   }
 }
 
-/** The server's answer, or null outside Rex or when it isn't up */
-async function ask(
-  port: number,
-  body: { block: string; files: string[]; line: number | null; focus: boolean },
-): Promise<{ opened: boolean } | null> {
+/** The server's answer to `body` at /core/`route`, or null when it isn't up
+ * or refuses */
+async function ask<T>(port: number, route: string, body: object): Promise<T | null> {
   try {
-    const res = await fetch(`http://127.0.0.1:${port}/core/edit`, {
+    const res = await fetch(`http://127.0.0.1:${port}/core/${route}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(3000),
     })
     if (!res.ok) {
-      console.error(`ah: edit refused: ${res.status} ${await res.text()}`)
+      console.error(`ah: ${route} refused: ${res.status} ${await res.text()}`)
       return null
     }
-    return (await res.json()) as { opened: boolean }
+    return (await res.json()) as T
   } catch {
     return null
   }
+}
+
+/** `ah edit --quickfix`: the list read from stdin, in the tab's nvim, or an
+ * error and exit 1, as there's no nvim of its own to start with a list */
+async function fillQuickfix(port: number, title: string, args: string[], focus: boolean) {
+  const fail = (error: string, code = 1): never => {
+    console.error(`ah: ${error}`)
+    process.exit(code)
+  }
+  if (args.length) fail("--quickfix reads its list from stdin, not files", 2)
+  if (!title) fail("--quickfix needs a title", 2)
+  let text = ""
+  for await (const chunk of process.stdin) text += chunk
+  const parsed = parseQuickfix(text, process.cwd())
+  if (!parsed.ok) return fail(parsed.error, 2)
+  const block = process.env.REX_BLOCK
+  if (!block) fail("--quickfix needs a Rex pane, for the tab's nvim")
+  const reply = await ask<{ shown: boolean }>(port, "quickfix", {
+    block,
+    title,
+    items: parsed.items,
+    focus,
+  })
+  if (!reply) fail("couldn't reach the tab's nvim through ah")
+  if (!reply?.shown) fail("this tab has no nvim to show the list in")
 }
 
 /** nvim in this terminal, exiting as it does */
@@ -90,12 +114,17 @@ function runNvim(files: string[], line: number | null): Promise<never> {
 export const edit = new Command("edit")
   .summary("Open files in the tab's nvim, like emacsclient")
   .description(
-    "Open files in the nvim of this Rex tab: the first one started there, which ah's nvim plugin tells it about. It takes the focus unless --no-focus. With no nvim in the tab, nvim runs here and becomes the tab's, or, without a terminal (an agent), it says so and exits 1. Outside Rex, or when the server isn't up, nvim runs here, given a terminal. +line goes to the first file, as in nvim. With no files, the tab's nvim takes the focus, or a bare nvim runs here. For a shell: alias v=\"ah edit\".",
+    "Open files in the nvim of this Rex tab, or with --quickfix fill a list there: the first one started there, which ah's nvim plugin tells it about. It takes the focus unless --no-focus. With no nvim in the tab, nvim runs here and becomes the tab's, or, without a terminal (an agent), it says so and exits 1. Outside Rex, or when the server isn't up, nvim runs here, given a terminal. +line goes to the first file, as in nvim. With no files, the tab's nvim takes the focus, or a bare nvim runs here. For a shell: alias v=\"ah edit\". With --quickfix <title>, the list's entries come on stdin, as JSON lines ({file, line, col?, text}) or file:line[:col]: text, and replace the list with that title or add one; with no nvim in the tab it says so and exits 1.",
   )
   .argument("[args...]", "[+line] then the files, or none for the tab's nvim as it is")
   .option("--no-focus", "Leave the focus where it is, as an agent pointing at code does")
+  .option(
+    "--quickfix <title>",
+    "Fill the quickfix list with this title from stdin, instead of opening files",
+  )
   .addOption(portOption())
-  .action(async (args, { focus, port }) => {
+  .action(async (args, { focus, port, quickfix }) => {
+    if (quickfix !== undefined) return await fillQuickfix(port, quickfix, args, focus)
     const parsed = parseEditArgs(args, process.cwd())
     if (!parsed.ok) {
       console.error(`ah: ${parsed.error}`)
@@ -103,7 +132,9 @@ export const edit = new Command("edit")
     }
     const { files, line } = parsed
     const block = process.env.REX_BLOCK
-    const reply = block ? await ask(port, { block, files, line, focus }) : null
+    const reply = block
+      ? await ask<{ opened: boolean }>(port, "edit", { block, files, line, focus })
+      : null
     const plan = editPlan(reply, {
       tty: Boolean(process.stdin.isTTY && process.stdout.isTTY),
     })

@@ -54,7 +54,8 @@ function connect(path: string): Promise<Socket | null> {
 
 // TODO(david): document NvimRemote, its constructor (the socket nvim listens
 // on, which may not be there yet, and waitMs: how long to wait for it, 0 for
-// an nvim that should be listening already), ping, reveal, open and close
+// an nvim that should be listening already), ping, reveal, open, quickfix
+// and close
 export class NvimRemote {
   readonly #client: Promise<NeovimClient | null>
   #closed = false
@@ -121,6 +122,14 @@ export class NvimRemote {
 
   async open(path: string, line: number): Promise<void> {
     await this.#call("open", [path, line])
+  }
+
+  async quickfix(
+    title: string,
+    items: { file: string; line: number; col: number; text: string }[],
+    open: boolean,
+  ): Promise<void> {
+    await this.#call("quickfix", [title, items, open])
   }
 
   close() {
