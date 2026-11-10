@@ -173,10 +173,35 @@ describe.skipIf(!hasNvim)("POST /core/edit", { timeout: 15_000 }, () => {
     expect(core.registry.editors.has("block:2")).toBe(false)
   })
 
+  test("with no files, focuses the tab's nvim", async () => {
+    await nvimIn("block:2")
+    expect(
+      (await edit({ block: "block:1", files: [], line: null, focus: true })).body,
+    ).toEqual({
+      opened: true,
+    })
+    expect(focused).toEqual({ blocks: ["block:2"], tabs: ["t1"] })
+  })
+
+  test("with no files, still forgets an nvim it can't reach", async () => {
+    core.receive({
+      kind: "editor",
+      event: "start",
+      block: "block:2",
+      socket: join(dir, "gone.sock"),
+    })
+    expect(
+      (await edit({ block: "block:1", files: [], line: null, focus: true })).body,
+    ).toEqual({
+      opened: false,
+    })
+    expect(core.registry.editors.has("block:2")).toBe(false)
+    expect(focused).toEqual({ blocks: [], tabs: [] })
+  })
+
   test("refuses a body that isn't one", async () => {
     for (const body of [
       { files: ["/a"], line: null, focus: true },
-      { block: "block:1", files: [], line: null, focus: true },
       { block: "block:1", files: ["a.ts"], line: null, focus: true },
       { block: "block:1", files: ["/a"], line: 0, focus: true },
     ])

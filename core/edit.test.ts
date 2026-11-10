@@ -18,8 +18,11 @@ describe("parseEditArgs", () => {
     })
   })
 
-  test("needs a file, and a +line that's a line", () => {
-    expect(parseEditArgs([], "/r")).toMatchObject({ ok: false })
+  test("takes no files, as a bare nvim does", () => {
+    expect(parseEditArgs([], "/r")).toEqual({ ok: true, files: [], line: null })
+  })
+
+  test("needs a file for a +line, and a +line that's a line", () => {
     expect(parseEditArgs(["+12"], "/r")).toMatchObject({ ok: false })
     expect(parseEditArgs(["+x", "a.ts"], "/r")).toMatchObject({ ok: false })
     expect(parseEditArgs(["+0", "a.ts"], "/r")).toMatchObject({ ok: false })
