@@ -24,8 +24,10 @@
 // working out afterwards why a title was what it was.
 
 import { appendFileSync, existsSync, mkdirSync } from "node:fs"
-import { dirname, join } from "node:path"
+import { dirname, isAbsolute, join } from "node:path"
+import { NvimRemote } from "../editors/neovim/remote.ts"
 import { isOneOf, isRecord, isString, str } from "../platform/guards.ts"
+import { focusBlock, selectTab } from "../platform/rex.ts"
 import type { AgentDirectory } from "../subjects/files/files.ts"
 import {
   addressAlive,
@@ -63,12 +65,27 @@ import {
   registryFile,
   saveRegistry,
   type SummaryJob,
+  tabEditor,
 } from "./registry.ts"
 import { type AgentView, listAgents, readClaudeProcesses } from "./agent_view.ts"
 import { buildSummaryPayload, generateSummary } from "./summary.ts"
 
 /** In a block that still exists, or running */
 export const isCurrent = (a: AgentView) => a.tab !== null || a.process !== null
+
+/** A posted `ah edit`, checked: absolute files, and a line from 1 or null */
+function parseEdit(
+  o: unknown,
+): { block: BlockId; files: string[]; line: number | null; focus: boolean } | null {
+  if (!isRecord(o)) return null
+  const block = str(o.block)
+  const { files, line, focus } = o
+  if (!block || typeof focus !== "boolean") return null
+  if (!Array.isArray(files) || !files.length) return null
+  if (!files.every((f) => isString(f) && isAbsolute(f))) return null
+  if (line !== null && !(Number.isInteger(line) && (line as number) >= 1)) return null
+  return { block, files: files as string[], line: line as number | null, focus }
+}
 
 /** A posted event, checked, or null if it isn't one */
 export function parseEvent(o: unknown): RegistryEvent | null {
@@ -325,6 +342,47 @@ export class Core implements AgentDirectory {
       null,
     )
     return standIn ? this.address(standIn) : null
+  }
+
+  // TODO(david): document edit(block, files, line, focus): files opened in
+  // the nvim of block's tab, as `ah edit` and the dashboard's ⌥-click do;
+  // false when the tab has none
+  async edit(
+    block: BlockId,
+    files: string[],
+    line: number | null,
+    focus: boolean,
+  ): Promise<boolean> {
+    const session = this.#rex?.sessions.find((s) =>
+      s.tabs.some((t) => t.blocks.some((b) => b.id === block)),
+    )
+    const tab = session?.tabs.find((t) => t.blocks.some((b) => b.id === block))
+    if (!session || !tab) return false
+    const editor = tabEditor(
+      tab.blocks.map((b) => b.id),
+      this.registry.editors,
+    )
+    if (!editor) return false
+    // It said it started, so it should be listening now
+    const remote = new NvimRemote(editor.socket, { waitMs: 0 })
+    try {
+      // The line is for the first file, as nvim's +line is
+      for (const [i, file] of files.entries())
+        await remote.open(file, i === 0 ? (line ?? 1) : 1)
+    } catch (e) {
+      console.error(`ah: couldn't reach the tab's nvim at ${editor.socket}:`, e)
+      // As if it said it ended, in order with the other events
+      this.receive({ kind: "editor", event: "end", ...editor })
+      return false
+    } finally {
+      remote.close()
+    }
+    if (focus) {
+      // It's open either way; these only bring it to the front
+      await selectTab(session.id, tab.id).catch((e) => console.error("ah:", e))
+      await focusBlock(session.id, editor.block).catch((e) => console.error("ah:", e))
+    }
+    return true
   }
 
   /** The live agents in `block`'s tab, in its layout order, for a file
@@ -604,6 +662,15 @@ export class Core implements AgentDirectory {
         root,
         ...this.trackers.get(root),
         done: this.trackers.done(root),
+      })
+    }
+    if (rest === "edit" && req.method === "POST") {
+      // { block, files, line, focus }: `ah edit` from a pane in the tab
+      const body: unknown = await req.json().catch(() => null)
+      const edit = parseEdit(body)
+      if (!edit) return new Response("bad edit", { status: 400 })
+      return Response.json({
+        opened: await this.edit(edit.block, edit.files, edit.line, edit.focus),
       })
     }
     if (rest === "agents-near" && req.method === "GET") {

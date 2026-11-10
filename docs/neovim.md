@@ -11,6 +11,7 @@ The markdown editor's editor pane runs the `nvim` on your `PATH` with `ah`'s plu
 - **Picks the agent.** In a Rex pane, the comment goes to an agent in the tab, as `ah message send` picks it. With one, the float's title names it. With several, the title starts on the pane's pick and Tab or Shift-Tab changes it. In the markdown page's pane, outside Rex, the comment goes into the file's thread instead.
 
 - **Tells ah it's there.** In a Rex pane (not the markdown pane), nvim reports starting and quitting with the socket it listens on (`ah hook editor`), so ah can open files in it. `ah debug editors` lists them. The first nvim started in a tab is that tab's nvim, the way an Emacs frame can belong to a project: the dashboard's ⌥-click on a file, and "nvim in this tab" in its open-with menu, open the file there and focus its pane, or a Rex float when the tab has none.
+- **`ah edit [+line] <file>…`** is an emacsclient for that nvim: from any shell in the tab, it opens the files in the tab's nvim and focuses it (`--no-focus` leaves the focus alone, for an agent pointing at code). With no nvim in the tab, it runs nvim right there, which becomes the tab's. Without a terminal (an agent) it says the tab has none instead. Alias it: `alias v="ah edit"`.
 
 ## Your own nvim
 

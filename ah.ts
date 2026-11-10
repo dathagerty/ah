@@ -32,6 +32,7 @@ import { MarkdownBackend } from "./views/markdown/routes.ts"
 import { HtmlBackend } from "./views/html/routes.ts"
 import { message, tracker, view } from "./views/cli.ts"
 import { debugAgents, debugEditors, workspace } from "./core/cli.ts"
+import { edit } from "./core/edit.ts"
 import { hook } from "./core/hook.ts"
 import { watchOpencode } from "./core/opencode.ts"
 import { Core } from "./core/core.ts"
@@ -374,7 +375,17 @@ const debug = new Command("debug").description(
 debug.addCommand(debugTabs)
 debug.addCommand(debugAgents)
 debug.addCommand(debugEditors)
-for (const command of [view, message, tracker, workspace, dashboard, server, hook, debug])
+for (const command of [
+  view,
+  edit,
+  message,
+  tracker,
+  workspace,
+  dashboard,
+  server,
+  hook,
+  debug,
+])
   program.addCommand(command)
 
 // `-h` is enough; no `help` subcommand, which isn't inherited, so at every

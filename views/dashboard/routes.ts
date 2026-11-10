@@ -24,9 +24,7 @@ import {
   type WorkspaceTrackers,
 } from "../../core/model.ts"
 import { Presence } from "../../platform/presence.ts"
-import { focusBlock, openFloat, selectTab } from "../../platform/rex.ts"
-import { NvimRemote } from "../../editors/neovim/remote.ts"
-import { tabEditor } from "../../core/registry.ts"
+import { openFloat, selectTab } from "../../platform/rex.ts"
 import { closeWindows } from "../../platform/window.ts"
 import { LogWatcher, SnapshotWatcher } from "./jj.ts"
 import { detectRunners } from "./tests/detect.ts"
@@ -1135,34 +1133,17 @@ export class Dashboard {
     return new Response(null, { status: 204 })
   }
 
-  /** The file in the tab's nvim (core/registry.ts tabEditor), with that tab
-   * brought forward and that pane focused. A float when the tab has none, or
-   * it can't be reached, which ah then forgets. */
+  /** The file in the tab's nvim (Core.edit, as `ah edit` does), with that
+   * tab brought forward and that pane focused. A float when the tab has
+   * none, or it can't be reached, which ah then forgets. */
   async #openInTab(
     path: string,
     tab: DashTab,
     pane: Pane,
     line?: number,
   ): Promise<Response> {
-    const blocks = this.#rexTab(tab)?.blocks.map((b) => b.id) ?? []
-    const editor = tabEditor(blocks, this.options.core.registry.editors)
-    if (editor) {
-      // It said it started, so it should be listening now
-      const remote = new NvimRemote(editor.socket, { waitMs: 0 })
-      try {
-        await remote.open(path, line ?? 1)
-        // It's open either way; these only bring it to the front
-        await selectTab(tab.session, tab.id).catch((e) => console.error("ah:", e))
-        await focusBlock(tab.session, editor.block).catch((e) => console.error("ah:", e))
-        return new Response(null, { status: 204 })
-      } catch (e) {
-        console.error(`ah: couldn't reach the tab's nvim at ${editor.socket}:`, e)
-        // As if it said it ended, in order with the other events
-        this.options.core.receive({ kind: "editor", event: "end", ...editor })
-      } finally {
-        remote.close()
-      }
-    }
+    if (await this.options.core.edit(pane.block, [path], line ?? null, true))
+      return new Response(null, { status: 204 })
     return await this.#openNvim(path, tab, pane, line)
   }
 
