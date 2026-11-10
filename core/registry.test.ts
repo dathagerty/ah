@@ -7,6 +7,7 @@ import { abbreviatePath, editorEvent, hookEvent } from "./hook.ts"
 import {
   agentId,
   apply,
+  tabEditor,
   applySummary,
   emptyRegistry,
   loadRegistry,
@@ -270,15 +271,15 @@ const editor = (event: "start" | "end", block: string, socket: string): Registry
 
 test("an nvim starting in a pane is that pane's editor, until it ends", () => {
   const r = emptyRegistry()
-  expect(apply(r, editor("start", "t1", "/tmp/nvim.1/0"))).toEqual({
+  expect(apply(r, editor("start", "t1", "/tmp/nvim.1/0"), 5)).toEqual({
     agent: null,
     blocks: [],
     summarize: null,
   })
-  apply(r, editor("start", "t2", "/tmp/nvim.2/0"))
+  apply(r, editor("start", "t2", "/tmp/nvim.2/0"), 6)
   expect(Object.fromEntries(r.editors)).toEqual({
-    t1: { socket: "/tmp/nvim.1/0" },
-    t2: { socket: "/tmp/nvim.2/0" },
+    t1: { socket: "/tmp/nvim.1/0", startedAt: 5 },
+    t2: { socket: "/tmp/nvim.2/0", startedAt: 6 },
   })
   apply(r, editor("end", "t1", "/tmp/nvim.1/0"))
   expect([...r.editors.keys()]).toEqual(["t2"])
@@ -286,10 +287,10 @@ test("an nvim starting in a pane is that pane's editor, until it ends", () => {
 
 test("a later nvim in the pane takes over, and an earlier one ending leaves it", () => {
   const r = emptyRegistry()
-  apply(r, editor("start", "t1", "/tmp/nvim.1/0"))
-  apply(r, editor("start", "t1", "/tmp/nvim.3/0"))
-  apply(r, editor("end", "t1", "/tmp/nvim.1/0"))
-  expect(r.editors.get("t1")).toEqual({ socket: "/tmp/nvim.3/0" })
+  apply(r, editor("start", "t1", "/tmp/nvim.1/0"), 1)
+  apply(r, editor("start", "t1", "/tmp/nvim.3/0"), 2)
+  apply(r, editor("end", "t1", "/tmp/nvim.1/0"), 3)
+  expect(r.editors.get("t1")).toEqual({ socket: "/tmp/nvim.3/0", startedAt: 2 })
 })
 
 test("prune drops the editors of closed panes and of sockets that are gone", () => {
@@ -319,10 +320,35 @@ test("editors are saved and loaded, and bad ones dropped", () => {
   stored.editors.t2 = { socket: 7 }
   writeFileSync(file, JSON.stringify(stored))
   expect(loadRegistry(file)?.editors).toEqual(r.editors)
+  // One saved before editors had a start time loads as the oldest
+  stored.editors = { t1: { socket: "/tmp/nvim.1/0" } }
+  writeFileSync(file, JSON.stringify(stored))
+  expect(loadRegistry(file)?.editors.get("t1")).toEqual({
+    socket: "/tmp/nvim.1/0",
+    startedAt: 0,
+  })
   // A registry saved before there were editors loads with none
   delete stored.editors
   writeFileSync(file, JSON.stringify(stored))
   expect(loadRegistry(file)?.editors).toEqual(new Map())
+})
+
+test("a tab's nvim is the first started in it that's still there", () => {
+  const r = emptyRegistry()
+  apply(r, editor("start", "t2", "/tmp/nvim.2/0"), 20)
+  apply(r, editor("start", "t1", "/tmp/nvim.1/0"), 10)
+  apply(r, editor("start", "t3", "/tmp/nvim.3/0"), 5)
+  // t3 started first, but in another tab
+  expect(tabEditor(["t1", "t2", "t9"], r.editors)).toEqual({
+    block: "t1",
+    socket: "/tmp/nvim.1/0",
+  })
+  apply(r, editor("end", "t1", "/tmp/nvim.1/0"), 30)
+  expect(tabEditor(["t1", "t2"], r.editors)).toEqual({
+    block: "t2",
+    socket: "/tmp/nvim.2/0",
+  })
+  expect(tabEditor(["t8", "t9"], r.editors)).toBeNull()
 })
 
 test("editorEvent is the pane's nvim starting or ending, only in a Rex pane", () => {

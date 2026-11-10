@@ -112,3 +112,92 @@ describe.skipIf(!hasNvim).concurrent("revealing a line, for ⌘-click in the pre
     expect(result).toMatchObject({ cursor: [50, 0], mode: "n" })
   })
 })
+
+/** Lua that runs ah.remote's open on `path` (relative to the test's
+ * directory) at the 1-based `line`, and returns the current buffer's name
+ * (relative), the cursor, the window count and the mode */
+function open(path: string, line: number) {
+  return `
+    local dir = vim.fs.dirname(file)
+    require("ah.remote").open(dir .. "/" .. ${JSON.stringify(path)}, ${line})
+    sleep(50)
+    return {
+      name = vim.fs.basename(vim.api.nvim_buf_get_name(0)),
+      cursor = vim.api.nvim_win_get_cursor(0),
+      windows = #vim.api.nvim_tabpage_list_wins(0),
+      mode = vim.api.nvim_get_mode().mode,
+    }
+  `
+}
+
+interface Opened {
+  name: string
+  cursor: [number, number]
+  windows: number
+  mode: string
+}
+
+/** Lua that writes `name` next to the test's file with 100 lines */
+const writeOther = (name: string) => `
+  write(${JSON.stringify(LINES)}, vim.fs.dirname(file) .. "/" .. ${JSON.stringify(name)})
+`
+
+describe
+  .skipIf(!hasNvim)
+  .concurrent("opening a file, for the dashboard and ah edit", () => {
+    test("opens it at the line, in normal mode", async () => {
+      const result = await inNvim<Opened>({
+        file: "one\n",
+        lua: `vim.cmd.edit(file) ${writeOther("other.ts")} ${open("other.ts", 40)}`,
+      })
+      expect(result).toEqual({ name: "other.ts", cursor: [40, 0], windows: 1, mode: "n" })
+    })
+
+    test("goes to a window already showing it", async () => {
+      const result = await inNvim<Opened>({
+        file: "one\n",
+        lua: `
+        ${writeOther("other.ts")}
+        vim.cmd.edit(vim.fs.dirname(file) .. "/other.ts")
+        vim.cmd.split(file)
+        ${open("other.ts", 7)}
+      `,
+      })
+      expect(result).toMatchObject({ name: "other.ts", cursor: [7, 0], windows: 2 })
+    })
+
+    test("keeps the unsaved text of the buffer it leaves", async () => {
+      const result = await inNvim({
+        file: "one\n",
+        lua: `
+        vim.cmd.edit(file)
+        keys("Atwo<Esc>")
+        ${writeOther("other.ts")}
+        require("ah.remote").open(vim.fs.dirname(file) .. "/other.ts", 1)
+        sleep(50)
+        local left = vim.fn.bufnr(file)
+        return {
+          text = table.concat(vim.api.nvim_buf_get_lines(left, 0, -1, false), "\\n"),
+          modified = vim.bo[left].modified,
+        }
+      `,
+      })
+      expect(result).toEqual({ text: "onetwo", modified: true })
+    })
+
+    test("takes a path with spaces", async () => {
+      const result = await inNvim<Opened>({
+        file: "one\n",
+        lua: `vim.cmd.edit(file) ${writeOther("a b.ts")} ${open("a b.ts", 3)}`,
+      })
+      expect(result).toMatchObject({ name: "a b.ts", cursor: [3, 0] })
+    })
+
+    test("goes to the last line for a line past the end, and leaves insert mode", async () => {
+      const result = await inNvim<Opened>({
+        file: "one\n",
+        lua: `vim.cmd.edit(file) keys("ifoo") ${writeOther("other.ts")} ${open("other.ts", 500)}`,
+      })
+      expect(result).toMatchObject({ name: "other.ts", cursor: [100, 0], mode: "n" })
+    })
+  })

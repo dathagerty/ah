@@ -47,14 +47,14 @@ test("markdown and html files open in the doc editor, whatever the extension's c
 test("any other file opens in nvim, in the dashboard's split", async () => {
   expect(await resolveLink(root, { file: "src/x.ts" })).toEqual({
     ok: true,
-    target: { open: "nvim", path: join(root, "src", "x.ts"), float: false },
+    target: { open: "nvim", path: join(root, "src", "x.ts"), in: "split" },
   })
 })
 
-test("an ⌥-click opens nvim in a Rex float instead", async () => {
+test("an ⌥-click opens it in the tab's nvim instead, which falls back to a float", async () => {
   expect(await resolveLink(root, { file: "src/x.ts", float: true })).toEqual({
     ok: true,
-    target: { open: "nvim", path: join(root, "src", "x.ts"), float: true },
+    target: { open: "nvim", path: join(root, "src", "x.ts"), in: "tab" },
   })
 })
 
@@ -66,11 +66,15 @@ test("the menu's pick says where a file opens, over its default", async () => {
   })
   expect(await resolveLink(root, { file: "src/x.ts", with: "float" })).toEqual({
     ok: true,
-    target: { open: "nvim", path: x, float: true },
+    target: { open: "nvim", path: x, in: "float" },
   })
   expect(await resolveLink(root, { file: "src/x.ts", with: "nvim" })).toEqual({
     ok: true,
-    target: { open: "nvim", path: x, float: false },
+    target: { open: "nvim", path: x, in: "split" },
+  })
+  expect(await resolveLink(root, { file: "src/x.ts", with: "tab", line: 2 })).toEqual({
+    ok: true,
+    target: { open: "nvim", path: x, in: "tab", line: 2 },
   })
   // A doc can go to nvim or Emacs too
   expect(await resolveLink(root, { file: "notes/a.md", with: "emacs" })).toEqual({
@@ -95,7 +99,7 @@ test("the doc editor is only for docs, and the pick has to be one there is", asy
 test("a line goes along to nvim and the doc editor", async () => {
   expect(await resolveLink(root, { file: "src/x.ts", line: 13 })).toEqual({
     ok: true,
-    target: { open: "nvim", path: join(root, "src", "x.ts"), float: false, line: 13 },
+    target: { open: "nvim", path: join(root, "src", "x.ts"), in: "split", line: 13 },
   })
   expect(await resolveLink(root, { file: "notes/a.md", line: 2 })).toEqual({
     ok: true,
