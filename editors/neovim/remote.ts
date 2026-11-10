@@ -54,7 +54,7 @@ function connect(path: string): Promise<Socket | null> {
 
 // TODO(david): document NvimRemote, its constructor (the socket nvim listens
 // on, which may not be there yet, and waitMs: how long to wait for it, 0 for
-// an nvim that should be listening already), reveal, open and close
+// an nvim that should be listening already), ping, reveal, open and close
 export class NvimRemote {
   readonly #client: Promise<NeovimClient | null>
   #closed = false
@@ -112,6 +112,11 @@ export class NvimRemote {
 
   async reveal(line: number, column: number, row: number): Promise<void> {
     await this.#call("reveal", [line, column, row])
+  }
+
+  /** Resolves once nvim answers, and rejects if it isn't listening */
+  async ping(): Promise<void> {
+    if (!(await this.#client)) throw new Error("nvim isn't listening")
   }
 
   async open(path: string, line: number): Promise<void> {

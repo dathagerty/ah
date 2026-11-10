@@ -24,7 +24,8 @@ export function parseEditArgs(
     line = n
     rest = argv.slice(1)
   }
-  if (!rest.length) return { ok: false, error: "no file to edit" }
+  // None, as for a bare nvim, but not a line with no file for it
+  if (!rest.length && line !== null) return { ok: false, error: "a +line needs a file" }
   return { ok: true, files: rest.map((f) => resolve(cwd, f)), line }
 }
 
@@ -89,9 +90,9 @@ function runNvim(files: string[], line: number | null): Promise<never> {
 export const edit = new Command("edit")
   .summary("Open files in the tab's nvim, like emacsclient")
   .description(
-    "Open files in the nvim of this Rex tab: the first one started there, which ah's nvim plugin tells it about. It takes the focus unless --no-focus. With no nvim in the tab, nvim runs here and becomes the tab's, or, without a terminal (an agent), it says so and exits 1. Outside Rex, or when the server isn't up, nvim runs here, given a terminal. +line goes to the first file, as in nvim. For a shell: alias v=\"ah edit\".",
+    "Open files in the nvim of this Rex tab: the first one started there, which ah's nvim plugin tells it about. It takes the focus unless --no-focus. With no nvim in the tab, nvim runs here and becomes the tab's, or, without a terminal (an agent), it says so and exits 1. Outside Rex, or when the server isn't up, nvim runs here, given a terminal. +line goes to the first file, as in nvim. With no files, the tab's nvim takes the focus, or a bare nvim runs here. For a shell: alias v=\"ah edit\".",
   )
-  .argument("<args...>", "[+line] then the files")
+  .argument("[args...]", "[+line] then the files, or none for the tab's nvim as it is")
   .option("--no-focus", "Leave the focus where it is, as an agent pointing at code does")
   .addOption(portOption())
   .action(async (args, { focus, port }) => {

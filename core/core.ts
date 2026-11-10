@@ -73,7 +73,8 @@ import { buildSummaryPayload, generateSummary } from "./summary.ts"
 /** In a block that still exists, or running */
 export const isCurrent = (a: AgentView) => a.tab !== null || a.process !== null
 
-/** A posted `ah edit`, checked: absolute files, and a line from 1 or null */
+/** A posted `ah edit`, checked: absolute files, maybe none, and a line from
+ * 1 or null */
 function parseEdit(
   o: unknown,
 ): { block: BlockId; files: string[]; line: number | null; focus: boolean } | null {
@@ -81,7 +82,8 @@ function parseEdit(
   const block = str(o.block)
   const { files, line, focus } = o
   if (!block || typeof focus !== "boolean") return null
-  if (!Array.isArray(files) || !files.length) return null
+  // None, as for a bare nvim: the tab's nvim, focused
+  if (!Array.isArray(files)) return null
   if (!files.every((f) => isString(f) && isAbsolute(f))) return null
   if (line !== null && !(Number.isInteger(line) && (line as number) >= 1)) return null
   return { block, files: files as string[], line: line as number | null, focus }
@@ -366,6 +368,9 @@ export class Core implements AgentDirectory {
     // It said it started, so it should be listening now
     const remote = new NvimRemote(editor.socket, { waitMs: 0 })
     try {
+      // With no files there's nothing to send, but focusing a pane nvim
+      // isn't in would be worse than a fresh nvim
+      if (!files.length) await remote.ping()
       // The line is for the first file, as nvim's +line is
       for (const [i, file] of files.entries())
         await remote.open(file, i === 0 ? (line ?? 1) : 1)
