@@ -201,3 +201,115 @@ describe
       expect(result).toMatchObject({ name: "other.ts", cursor: [100, 0], mode: "n" })
     })
   })
+
+/** Lua that fills a quickfix list with `items`, as `{file, line, col, text}`
+ * relative to the test's directory */
+function quickfix(
+  title: string,
+  items: { file: string; line: number; text: string }[],
+  open = false,
+) {
+  return `
+    do
+      local dir = vim.fs.dirname(file)
+      local items = vim.json.decode(${JSON.stringify(JSON.stringify(items))})
+      for _, item in ipairs(items) do item.file = dir .. "/" .. item.file; item.col = 1 end
+      require("ah.remote").quickfix(${JSON.stringify(title)}, items, ${open})
+      sleep(50)
+    end
+  `
+}
+
+/** Lua returning the quickfix stack: each list's title and item texts, the
+ * current list's number, and whether a quickfix window is open */
+const STACK = `
+  local lists = {}
+  for nr = 1, vim.fn.getqflist({ nr = "$" }).nr do
+    local list = vim.fn.getqflist({ nr = nr, title = 1, items = 1 })
+    table.insert(lists, {
+      title = list.title,
+      texts = vim.tbl_map(function(i) return i.text end, list.items),
+      lines = vim.tbl_map(function(i) return i.lnum end, list.items),
+    })
+  end
+  local open = false
+  for _, win in ipairs(vim.api.nvim_list_wins()) do
+    if vim.fn.getwininfo(win)[1].quickfix == 1 then open = true end
+  end
+  return { lists = lists, current = vim.fn.getqflist({ nr = 0 }).nr, open = open }
+`
+
+describe.skipIf(!hasNvim).concurrent("quickfix lists, for ah edit --quickfix", () => {
+  test("fills a list with its title and items, and makes it current", async () => {
+    const result = await inNvim({
+      file: LINES,
+      lua: `
+        vim.cmd.edit(file)
+        ${quickfix("tests to review", [
+          { file: "notes.md", line: 3, text: "fails" },
+          { file: "notes.md", line: 9, text: "guard" },
+        ])}
+        ${STACK}
+      `,
+    })
+    expect(result).toEqual({
+      lists: [{ title: "tests to review", texts: ["fails", "guard"], lines: [3, 9] }],
+      current: 1,
+      open: false,
+    })
+  })
+
+  test("replaces the list with the same title, and adds one with a new title", async () => {
+    const result = await inNvim({
+      file: LINES,
+      lua: `
+        vim.cmd.edit(file)
+        ${quickfix("tests to review", [{ file: "notes.md", line: 3, text: "first" }])}
+        ${quickfix("decisions", [{ file: "notes.md", line: 5, text: "why" }])}
+        ${quickfix("tests to review", [{ file: "notes.md", line: 4, text: "second" }])}
+        ${STACK}
+      `,
+    })
+    expect(result).toEqual({
+      lists: [
+        { title: "tests to review", texts: ["second"], lines: [4] },
+        { title: "decisions", texts: ["why"], lines: [5] },
+      ],
+      current: 1,
+      open: false,
+    })
+  })
+
+  test("opens the quickfix window when asked", async () => {
+    const result = await inNvim({
+      file: LINES,
+      lua: `
+        vim.cmd.edit(file)
+        ${quickfix("tests to review", [{ file: "notes.md", line: 3, text: "fails" }], true)}
+        ${STACK}
+      `,
+    })
+    expect(result).toMatchObject({ open: true })
+  })
+
+  test("otherwise leaves the layout alone and says what came", async () => {
+    const result = await inNvim({
+      file: LINES,
+      lua: `
+        vim.cmd.edit(file)
+        local windows = #vim.api.nvim_list_wins()
+        ${quickfix("tests to review", [
+          { file: "notes.md", line: 3, text: "a" },
+          { file: "notes.md", line: 4, text: "b" },
+        ])}
+        return { windows = #vim.api.nvim_list_wins() - windows, notices = notices }
+      `,
+    })
+    expect(result).toEqual({
+      windows: 0,
+      notices: [
+        expect.objectContaining({ msg: expect.stringMatching(/2 .*tests to review/) }),
+      ],
+    })
+  })
+})

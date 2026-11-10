@@ -208,3 +208,68 @@ describe.skipIf(!hasNvim)("POST /core/edit", { timeout: 15_000 }, () => {
       expect((await edit(body)).status).toEqual(400)
   })
 })
+
+const quickfix = async (body: object) => {
+  const res = await core.handle(
+    new Request("http://ah/core/quickfix", { method: "POST", body: JSON.stringify(body) }),
+    "quickfix",
+  )
+  const text = await res.text()
+  return {
+    status: res.status,
+    body: res.headers.get("content-type")?.includes("json") ? JSON.parse(text) : text,
+  }
+}
+
+describe.skipIf(!hasNvim)("POST /core/quickfix", { timeout: 15_000 }, () => {
+  test("fills the list in the tab's nvim, opens it, and focuses its pane", async () => {
+    const { client } = await nvimIn("block:2")
+    const a = await file("a.ts")
+    const items = [{ file: a, line: 4, col: 1, text: "fails" }]
+    expect(
+      await quickfix({ block: "block:1", title: "tests to review", items, focus: true }),
+    ).toEqual({ status: 200, body: { shown: true } })
+    expect(await client.call("getqflist", [{ title: 1, size: 1 }])).toEqual({
+      title: "tests to review",
+      size: 1,
+    })
+    expect(focused).toEqual({ blocks: ["block:2"], tabs: ["t1"] })
+  })
+
+  test("leaves the focus alone when told to", async () => {
+    await nvimIn("block:2")
+    const a = await file("a.ts")
+    const items = [{ file: a, line: 4, col: 1, text: "fails" }]
+    expect(
+      (await quickfix({ block: "block:1", title: "t", items, focus: false })).body,
+    ).toEqual({ shown: true })
+    expect(focused).toEqual({ blocks: [], tabs: [] })
+  })
+
+  test("says when the tab has no nvim, and forgets one it can't reach", async () => {
+    core.receive({
+      kind: "editor",
+      event: "start",
+      block: "block:2",
+      socket: join(dir, "gone.sock"),
+    })
+    const items = [{ file: "/r/a.ts", line: 1, col: 1, text: "x" }]
+    expect(
+      (await quickfix({ block: "block:1", title: "t", items, focus: true })).body,
+    ).toEqual({ shown: false })
+    expect(core.registry.editors.has("block:2")).toBe(false)
+  })
+
+  test("refuses a body that isn't one", async () => {
+    const item = { file: "/r/a.ts", line: 1, col: 1, text: "x" }
+    for (const body of [
+      { title: "t", items: [item], focus: true },
+      { block: "block:1", title: "", items: [item], focus: true },
+      { block: "block:1", title: "t", items: [{ ...item, file: "a.ts" }], focus: true },
+      { block: "block:1", title: "t", items: [{ ...item, line: 0 }], focus: true },
+      { block: "block:1", title: "t", items: [{ ...item, text: 3 }], focus: true },
+      { block: "block:1", title: "t", items: "nope", focus: true },
+    ])
+      expect((await quickfix(body)).status).toEqual(400)
+  })
+})
