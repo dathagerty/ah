@@ -43,7 +43,7 @@ Codex fires `SessionStart` on the first prompt rather than at launch, so a Codex
 
 ## Skills
 
-`skills/` contains agent-facing instructions for using the `ah` tools (`markdown`, `html`, `tracker`, and `skepsis`) and for opening panes with `rex split`. Copy or symlink them into your harness's skills directory.
+`skills/` contains agent-facing instructions for using the `ah` tools (`markdown`, `html`, `tracker`, `skepsis`, and `nvim`, for the tab's nvim and its quickfix lists) and for opening panes with `rex split`. Copy or symlink them into your harness's skills directory.
 
 ## Editor pane
 

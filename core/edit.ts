@@ -8,6 +8,7 @@
 
 import { Command } from "@commander-js/extra-typings"
 import { spawn } from "node:child_process"
+import { readFile } from "node:fs/promises"
 import { resolve } from "node:path"
 import { portOption } from "../platform/cli.ts"
 import { parseQuickfix } from "./quickfix.ts"
@@ -74,15 +75,27 @@ async function ask<T>(port: number, route: string, body: object): Promise<T | nu
 
 /** `ah edit --quickfix`: the list read from stdin, in the tab's nvim, or an
  * error and exit 1, as there's no nvim of its own to start with a list */
-async function fillQuickfix(port: number, title: string, args: string[], focus: boolean) {
+async function fillQuickfix(
+  port: number,
+  title: string,
+  args: string[],
+  focus: boolean,
+  from: string | undefined,
+) {
   const fail = (error: string, code = 1): never => {
     console.error(`ah: ${error}`)
     process.exit(code)
   }
-  if (args.length) fail("--quickfix reads its list from stdin, not files", 2)
+  if (args.length) fail("--quickfix reads its list from stdin or --from, not files", 2)
   if (!title) fail("--quickfix needs a title", 2)
   let text = ""
-  for await (const chunk of process.stdin) text += chunk
+  if (from !== undefined) {
+    try {
+      text = await readFile(from, "utf8")
+    } catch (e) {
+      fail(`couldn't read ${from}: ${(e as Error).message}`, 2)
+    }
+  } else for await (const chunk of process.stdin) text += chunk
   const parsed = parseQuickfix(text, process.cwd())
   if (!parsed.ok) return fail(parsed.error, 2)
   const block = process.env.REX_BLOCK
@@ -122,9 +135,17 @@ export const edit = new Command("edit")
     "--quickfix <title>",
     "Fill the quickfix list with this title from stdin, instead of opening files",
   )
+  .option(
+    "--from <file>",
+    "With --quickfix, read the list from this file instead of stdin, for a caller that can't pipe",
+  )
   .addOption(portOption())
-  .action(async (args, { focus, port, quickfix }) => {
-    if (quickfix !== undefined) return await fillQuickfix(port, quickfix, args, focus)
+  .action(async (args, { focus, port, quickfix, from }) => {
+    if (quickfix !== undefined) return await fillQuickfix(port, quickfix, args, focus, from)
+    if (from !== undefined) {
+      console.error("ah: --from is for --quickfix")
+      process.exit(2)
+    }
     const parsed = parseEditArgs(args, process.cwd())
     if (!parsed.ok) {
       console.error(`ah: ${parsed.error}`)
