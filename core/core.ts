@@ -190,7 +190,7 @@ export class Core implements AgentDirectory {
   #listeners: Listener[] = []
   #notices = new Notices()
   /** What windows show, from the backends (watchShowing) */
-  #showing: () => Showing = () => ({ files: [], dashboard: false })
+  #showing: () => Omit<Showing, "nvim"> = () => ({ files: [], dashboard: false })
   /** Blocks named by an event in the last few seconds, which the
    * RexState may not have caught up with, so pruning leaves them alone */
   #recent = new Map<string, number>()
@@ -230,7 +230,7 @@ export class Core implements AgentDirectory {
 
   /** Where to find what windows show, for telling agents when a file they
    * opened stops showing */
-  watchShowing(showing: () => Showing) {
+  watchShowing(showing: () => Omit<Showing, "nvim">) {
     this.#showing = showing
   }
 
@@ -554,16 +554,34 @@ export class Core implements AgentDirectory {
     if (event.event !== "SessionStart" && event.event !== "UserPromptSubmit") return null
     const root = await this.#workspaceOf(event)
     const current = root && this.trackers.currentPath(root)
+    const showing = { ...this.#showing(), nvim: this.#tabHasNvim(agent) }
     if (event.event === "SessionStart") {
-      this.#notices.start(agent, current, this.#showing())
-      if (!root) return null
-      const active = this.trackers
-        .get(root)
-        .active.flatMap((t) => ("path" in t.subject ? [t.subject.path] : []))
-      return startContext(current, active)
+      this.#notices.start(agent, current, showing)
+      const active = root
+        ? this.trackers
+            .get(root)
+            .active.flatMap((t) => ("path" in t.subject ? [t.subject.path] : []))
+        : []
+      return startContext(root ? current : null, active, showing.nvim)
     }
-    const lines = this.#notices.since(agent, current, this.#showing())
+    const lines = this.#notices.since(agent, current, showing)
     return lines.length ? lines.join("\n") : null
+  }
+
+  /** Whether the agent's tab has a registered nvim (tabEditor) */
+  #tabHasNvim(agent: AgentId): boolean {
+    const record = this.registry.agents.get(agent)
+    const block = record && blockOf(record)
+    if (!block) return false
+    const tab = this.#rex?.sessions
+      .flatMap((s) => s.tabs)
+      .find((t) => t.blocks.some((b) => b.id === block))
+    return tab
+      ? tabEditor(
+          tab.blocks.map((b) => b.id),
+          this.registry.editors,
+        ) !== null
+      : false
   }
 
   /** A Codex or opencode event without a block (it came from their

@@ -30,6 +30,8 @@ export interface OpenFileState {
 export interface Showing {
   files: OpenFileState[]
   dashboard: boolean
+  /** The agent's tab has a registered nvim (core/registry.ts tabEditor) */
+  nvim: boolean
 }
 
 interface Told {
@@ -37,21 +39,34 @@ interface Told {
   /** Bound views by path: whether the agent last knew it as open */
   files: Map<string, boolean>
   dashboard: boolean
+  nvim: boolean
 }
 
-/** What a starting session is told about its workspace's trackers, or null
- * if it has none */
-export function startContext(current: string | null, active: string[]): string | null {
+/** The line about the tab's nvim, so the nvim skill's rules (lists at red
+ * and green, pointing at code) apply in any harness */
+const NVIM_LINE =
+  "This tab has an nvim: the nvim skill opens code in it and hands the user " +
+  "lists of what needs them there (tests to review, decisions to check, answers)."
+
+/** What a starting session is told about its workspace's trackers and its
+ * tab's nvim, or null if there's neither */
+export function startContext(
+  current: string | null,
+  active: string[],
+  nvim = false,
+): string | null {
   const paths = current && !active.includes(current) ? [current, ...active] : active
-  if (!paths.length) return null
-  const lines = paths.map((p) => `- ${p}${p === current ? " (current)" : ""}`)
-  return [
-    `Active trackers in this workspace (\`ah tracker ls\`). The ah dashboard ` +
-      `shows the current one, which is what a request that doesn't name a ` +
-      `tracker refers to.`,
-    ...lines,
-    `When picking up work, check the tracker it belongs to, and keep it updated.`,
-  ].join("\n")
+  const lines = paths.length
+    ? [
+        `Active trackers in this workspace (\`ah tracker ls\`). The ah dashboard ` +
+          `shows the current one, which is what a request that doesn't name a ` +
+          `tracker refers to.`,
+        ...paths.map((p) => `- ${p}${p === current ? " (current)" : ""}`),
+        `When picking up work, check the tracker it belongs to, and keep it updated.`,
+      ]
+    : []
+  if (nvim) lines.push(NVIM_LINE)
+  return lines.length ? lines.join("\n") : null
 }
 
 export class Notices {
@@ -88,6 +103,11 @@ export class Notices {
         lines.push(`ah: no window shows ${path}, which you opened, any more`)
     }
     if (last.dashboard && !now.dashboard) lines.push(`ah: the dashboard is closed now`)
+    if (now.nvim && !last.nvim)
+      lines.push(
+        "ah: this tab has an nvim now: the nvim skill opens code in it and hands the user lists there",
+      )
+    if (last.nvim && !now.nvim) lines.push("ah: this tab's nvim has gone")
     return lines
   }
 }
@@ -98,4 +118,5 @@ const told = (agent: AgentId, current: string | null, showing: Showing): Told =>
     showing.files.filter((v) => v.agent === agent).map((v) => [v.path, v.open]),
   ),
   dashboard: showing.dashboard,
+  nvim: showing.nvim,
 })
