@@ -306,6 +306,20 @@ export async function selectTab(session: string, tab: string): Promise<void> {
   if (!success) throw new Error(`rex do session.select: ${stderr.trim()}`)
 }
 
+// TODO(david): document focusBlock(session, block): the pane gets the focus
+// in its tab, as for the tab's nvim taking a file
+export async function focusBlock(session: string, block: string): Promise<void> {
+  const { success, stderr } = await runRex([
+    "--autostart=false",
+    "block",
+    "focus",
+    block,
+    "--session",
+    session,
+  ])
+  if (!success) throw new Error(`rex block focus: ${stderr.trim()}`)
+}
+
 /** Run `command` in a floating pane over most of the tab with `block`, which
  * closes when the command exits. The tab is named because Rex otherwise puts
  * the float in its active tab, which may be another. Rex runs the command

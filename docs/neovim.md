@@ -10,6 +10,8 @@ The markdown editor's editor pane runs the `nvim` on your `PATH` with `ah`'s plu
 - **Comments to the agent.** `<leader>ac` comments on the cursor's line, or the selected lines in visual mode, with the selected text. `<leader>aC` comments on the whole file. The comment goes in a float under the lines. Enter sends, Ctrl-J (or Shift- or Alt-Enter) adds a line, and Esc then Esc (or `q`) cancels, as does leaving the float. The file is saved first, so the agent reads the lines the comment is on. After a failed merge, it refuses until a merge succeeds.
 - **Picks the agent.** In a Rex pane, the comment goes to an agent in the tab, as `ah message send` picks it. With one, the float's title names it. With several, the title starts on the pane's pick and Tab or Shift-Tab changes it. In the markdown page's pane, outside Rex, the comment goes into the file's thread instead.
 
+- **Tells ah it's there.** In a Rex pane (not the markdown pane), nvim reports starting and quitting with the socket it listens on (`ah hook editor`), so ah can open files in it. `ah debug editors` lists them. The first nvim started in a tab is that tab's nvim, the way an Emacs frame can belong to a project: the dashboard's ⌥-click on a file, and "nvim in this tab" in its open-with menu, open the file there and focus its pane, or a Rex float when the tab has none.
+
 ## Your own nvim
 
 Add the plugin's directory to the runtimepath and call `setup()`:

@@ -27,7 +27,7 @@ const logger = {
   error: (...args: unknown[]) => (console.error("ah: nvim client:", ...args), logger),
 } as unknown as Logger
 
-/** How long nvim has to start listening after it's spawned */
+/** How long nvim has to start listening after it's spawned, by default */
 const LISTEN_WAIT_MS = 5000
 /** How long a call has before it's given up on */
 const CALL_TIMEOUT_MS = 2000
@@ -53,20 +53,21 @@ function connect(path: string): Promise<Socket | null> {
 }
 
 // TODO(david): document NvimRemote, its constructor (the socket nvim listens
-// on, which may not be there yet), reveal and close
+// on, which may not be there yet, and waitMs: how long to wait for it, 0 for
+// an nvim that should be listening already), reveal, open and close
 export class NvimRemote {
   readonly #client: Promise<NeovimClient | null>
   #closed = false
 
-  constructor(socket: string) {
-    this.#client = this.#attach(socket)
+  constructor(socket: string, { waitMs = LISTEN_WAIT_MS }: { waitMs?: number } = {}) {
+    this.#client = this.#attach(socket, waitMs)
   }
 
   /** The client, once nvim has started up. It listens before that: before
    * --cmd has put the plugin on the runtimepath, and before the file loads,
    * so calls wait for v:vim_did_enter. */
-  async #attach(path: string): Promise<NeovimClient | null> {
-    const until = Date.now() + LISTEN_WAIT_MS
+  async #attach(path: string, waitMs: number): Promise<NeovimClient | null> {
+    const until = Date.now() + waitMs
     while (!(await exists(path))) {
       if (this.#closed || Date.now() > until) return null
       await sleep(50)
@@ -111,6 +112,10 @@ export class NvimRemote {
 
   async reveal(line: number, column: number, row: number): Promise<void> {
     await this.#call("reveal", [line, column, row])
+  }
+
+  async open(path: string, line: number): Promise<void> {
+    await this.#call("open", [path, line])
   }
 
   close() {

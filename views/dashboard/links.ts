@@ -8,11 +8,14 @@ import { isAbsolute, join, relative, sep } from "node:path"
 export type LinkTarget =
   /** `line`, from the Tests tab's failures and definitions, where it goes */
   | { open: "doc"; path: string; line?: number }
-  /** In the dashboard's split under the log, or a Rex float for an ⌥-click */
-  | { open: "nvim"; path: string; float: boolean; line?: number }
+  /** In the dashboard's split under the log, a Rex float, or the tab's own
+   * nvim, falling back to a float when it has none (an ⌥-click) */
+  | { open: "nvim"; path: string; in: NvimPlace; line?: number }
   /** In the running Emacs, from the open-with menu */
   | { open: "emacs"; path: string; line?: number }
   | { open: "skepsis"; rev: string }
+
+export type NvimPlace = "split" | "float" | "tab"
 
 export type LinkResult =
   | { ok: true; target: LinkTarget }
@@ -34,10 +37,11 @@ const refuse = (status: 400 | 404, error: string): LinkResult => ({
 const isNotFound = (e: unknown) => (e as NodeJS.ErrnoException).code === "ENOENT"
 
 /** Where the open-with menu can send a file; `doc` only for docs */
-const WITH = new Set(["doc", "nvim", "float", "emacs"])
+const WITH = new Set(["doc", "nvim", "float", "tab", "emacs"])
 
 /** `body` as the page posts it: `{ file }`, relative to the workspace root,
- * with `float` for an ⌥-click or `with` for the open-with menu's pick, and a
+ * with `float` for an ⌥-click (which goes to the tab's nvim, falling back to
+ * a float) or `with` for the open-with menu's pick, and a
  * 1-based `line` to open at; or `{ rev }`. A file must be in the workspace
  * once symlinks are followed. */
 export async function resolveLink(root: string, body: unknown): Promise<LinkResult> {
@@ -89,10 +93,14 @@ export async function resolveLink(root: string, body: unknown): Promise<LinkResu
   if (pick === "doc" && !isDoc)
     return refuse(400, "the doc editor is for markdown and html")
   if (pick === "emacs") return { ok: true, target: { open: "emacs", path, ...at } }
-  if (pick === "nvim" || pick === "float")
-    return { ok: true, target: { open: "nvim", path, float: pick === "float", ...at } }
+  if (pick === "nvim" || pick === "float" || pick === "tab") {
+    const place: NvimPlace = pick === "nvim" ? "split" : pick
+    return { ok: true, target: { open: "nvim", path, in: place, ...at } }
+  }
   return {
     ok: true,
-    target: isDoc ? { open: "doc", path, ...at } : { open: "nvim", path, float, ...at },
+    target: isDoc
+      ? { open: "doc", path, ...at }
+      : { open: "nvim", path, in: float ? "tab" : "split", ...at },
   }
 }

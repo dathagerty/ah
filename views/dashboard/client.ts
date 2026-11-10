@@ -410,18 +410,20 @@ for (const t of document.querySelectorAll<HTMLElement>(".log-tab"))
 
 // A file or change ID in the log (ansi.ts) opens in the doc editor, nvim,
 // or skepsis; the server picks which (links.ts). nvim opens in the split
-// under the log, or with ⌥ in a Rex float. Not at the end of a drag that
-// selected the link's text.
+// under the log, or with ⌥ in the tab's own nvim, or a Rex float when it has
+// none. Not at the end of a drag that selected the link's text.
 // Right-click on a file: every way to open it (links.ts `with`), now that
-// there are several. A plain click is still its default, ⌥ still the float.
+// there are several. A plain click is still its default, ⌥ still the tab's
+// nvim.
 const openMenu = byId("open-menu")
 const isDoc = (file: string) => /\.(md|markdown|html?)$/i.test(file)
 
 function showOpenMenu(e: MouseEvent, file: string, line?: number) {
   const tab = state.focused
   if (!tab) return
-  const choices: [string, "doc" | "nvim" | "float" | "emacs"][] = [
+  const choices: [string, "doc" | "nvim" | "float" | "tab" | "emacs"][] = [
     ["nvim, under the log", "nvim"],
+    ["nvim in this tab", "tab"],
     ["nvim, in a Rex float", "float"],
     ["Emacs", "emacs"],
   ]
@@ -487,7 +489,7 @@ async function openLink(body: {
   rev?: string
   float?: boolean
   line?: number
-  with?: "doc" | "nvim" | "float" | "emacs"
+  with?: "doc" | "nvim" | "float" | "tab" | "emacs"
 }) {
   const res = await fetch("open", { method: "POST", body: JSON.stringify(body) })
   if (!res.ok)

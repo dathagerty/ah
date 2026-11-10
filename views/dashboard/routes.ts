@@ -24,7 +24,9 @@ import {
   type WorkspaceTrackers,
 } from "../../core/model.ts"
 import { Presence } from "../../platform/presence.ts"
-import { openFloat, selectTab } from "../../platform/rex.ts"
+import { focusBlock, openFloat, selectTab } from "../../platform/rex.ts"
+import { NvimRemote } from "../../editors/neovim/remote.ts"
+import { tabEditor } from "../../core/registry.ts"
 import { closeWindows } from "../../platform/window.ts"
 import { LogWatcher, SnapshotWatcher } from "./jj.ts"
 import { detectRunners } from "./tests/detect.ts"
@@ -969,10 +971,15 @@ export class Dashboard {
 
   /** A pane in the tab to act as, for what the server does on its behalf */
   #paneOf(tab: DashTab): Pane | null {
-    const rexTab = this.#rex?.sessions
+    const rexTab = this.#rexTab(tab)
+    return (rexTab && paneIn(tab.session, rexTab)) ?? null
+  }
+
+  /** The tab as Rex last told of it, with its panes */
+  #rexTab(tab: DashTab) {
+    return this.#rex?.sessions
       .find((s) => s.id === tab.session)
       ?.tabs.find((t) => t.id === tab.id)
-    return (rexTab && paneIn(tab.session, rexTab)) ?? null
   }
 
   /** The new-tracker button: the goal goes to the tab's agent (new_tracker.ts) */
@@ -1039,7 +1046,9 @@ export class Dashboard {
       return await this.#launch(
         docLaunch(target.path, tab.root, pane, this.options.port, AH),
       )
-    if (target.open === "nvim" && target.float)
+    if (target.open === "nvim" && target.in === "tab")
+      return await this.#openInTab(target.path, tab, pane, target.line)
+    if (target.open === "nvim" && target.in === "float")
       return await this.#openNvim(target.path, tab, pane, target.line)
     if (target.open === "nvim") return await this.#nvimSplit(target.path)
     if (target.open === "emacs") return await this.#openEmacs(target.path, target.line)
@@ -1124,6 +1133,37 @@ export class Dashboard {
     // It's open either way; this only brings it to the front
     await run("emacsclient", focus).catch(() => {})
     return new Response(null, { status: 204 })
+  }
+
+  /** The file in the tab's nvim (core/registry.ts tabEditor), with that tab
+   * brought forward and that pane focused. A float when the tab has none, or
+   * it can't be reached, which ah then forgets. */
+  async #openInTab(
+    path: string,
+    tab: DashTab,
+    pane: Pane,
+    line?: number,
+  ): Promise<Response> {
+    const blocks = this.#rexTab(tab)?.blocks.map((b) => b.id) ?? []
+    const editor = tabEditor(blocks, this.options.core.registry.editors)
+    if (editor) {
+      // It said it started, so it should be listening now
+      const remote = new NvimRemote(editor.socket, { waitMs: 0 })
+      try {
+        await remote.open(path, line ?? 1)
+        // It's open either way; these only bring it to the front
+        await selectTab(tab.session, tab.id).catch((e) => console.error("ah:", e))
+        await focusBlock(tab.session, editor.block).catch((e) => console.error("ah:", e))
+        return new Response(null, { status: 204 })
+      } catch (e) {
+        console.error(`ah: couldn't reach the tab's nvim at ${editor.socket}:`, e)
+        // As if it said it ended, in order with the other events
+        this.options.core.receive({ kind: "editor", event: "end", ...editor })
+      } finally {
+        remote.close()
+      }
+    }
+    return await this.#openNvim(path, tab, pane, line)
   }
 
   /** nvim in a float over the tab, which Rex then shows: the click was to

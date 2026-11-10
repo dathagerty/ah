@@ -45,4 +45,18 @@ function M.reveal(line, column, row)
   vim.fn.winrestview({ topline = top, lnum = lnum, col = col })
 end
 
+-- TODO(david): document open(path, line): the dashboard's ⌥-click and
+-- `ah edit`, with a 1-based line as links and +line have it
+function M.open(path, line)
+  if vim.api.nvim_get_mode().mode ~= "n" then
+    vim.api.nvim_feedkeys(vim.keycode("<C-\\><C-n>"), "nx", false)
+  end
+  -- :drop goes to a window already showing the file, or else edits it in the
+  -- current one, leaving the buffer there hidden with any unsaved text
+  vim.cmd.drop(vim.fn.fnameescape(path))
+  local last = vim.api.nvim_buf_line_count(0)
+  vim.api.nvim_win_set_cursor(0, { math.max(1, math.min(line, last)), 0 })
+  vim.cmd("normal! zz")
+end
+
 return M

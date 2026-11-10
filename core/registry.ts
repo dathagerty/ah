@@ -64,6 +64,9 @@ export interface Registry {
 export interface EditorRecord {
   /** Where it listens (v:servername) */
   socket: string
+  /** When it said it started, which makes the first in a tab that tab's
+   * nvim (tabEditor) */
+  startedAt: number
 }
 
 export const emptyRegistry = (): Registry => ({
@@ -172,7 +175,7 @@ export function apply(r: Registry, e: RegistryEvent, now = Date.now()): Applied 
   if (e.kind === "editor") {
     // A later nvim in the pane takes it over, and an earlier one ending
     // leaves that one there
-    if (e.event === "start") r.editors.set(e.block, { socket: e.socket })
+    if (e.event === "start") r.editors.set(e.block, { socket: e.socket, startedAt: now })
     else if (r.editors.get(e.block)?.socket === e.socket) r.editors.delete(e.block)
     return { agent: null, blocks: [], summarize: null }
   }
@@ -236,6 +239,20 @@ export function apply(r: Registry, e: RegistryEvent, now = Date.now()): Applied 
   r.agents.set(id, record)
   if (block) blocks.push(block)
   return { agent: id, blocks, summarize }
+}
+
+// TODO(david): document tabEditor(blocks, editors): the tab's nvim, one per
+// tab as an Emacs frame per project, which opening files goes to
+export function tabEditor(
+  blocks: BlockId[],
+  editors: Map<BlockId, EditorRecord>,
+): { block: BlockId; socket: string } | null {
+  let first: { block: BlockId; socket: string; startedAt: number } | null = null
+  for (const block of blocks) {
+    const e = editors.get(block)
+    if (e && (!first || e.startedAt < first.startedAt)) first = { block, ...e }
+  }
+  return first && { block: first.block, socket: first.socket }
 }
 
 /** Record a finished summary. Returns the block to retitle, if the summary
@@ -329,7 +346,13 @@ export function loadRegistry(file = registryFile()): Registry | null {
     picks: entries(raw.picks, isString),
     outbox: entries(raw.outbox, isStrings),
     held: new Set(Array.isArray(raw.held) ? raw.held.filter(isString) : []),
-    editors: entries(raw.editors, isEditorRecord),
+    // One saved before editors had a start time counts as the oldest
+    editors: new Map(
+      [...entries(raw.editors, isEditorRecord)].map(([block, e]) => [
+        block,
+        { socket: e.socket, startedAt: typeof e.startedAt === "number" ? e.startedAt : 0 },
+      ]),
+    ),
   }
 }
 
@@ -372,7 +395,7 @@ const isWorkspaceRecord = (w: unknown): w is WorkspaceRecord =>
 
 const isStrings = (v: unknown): v is string[] => Array.isArray(v) && v.every(isString)
 
-const isEditorRecord = (e: unknown): e is EditorRecord =>
+const isEditorRecord = (e: unknown): e is Partial<EditorRecord> & { socket: string } =>
   isRecord(e) && typeof e.socket === "string" && e.socket !== ""
 
 function entries<T>(value: unknown, is: (v: unknown) => v is T): Map<string, T> {
