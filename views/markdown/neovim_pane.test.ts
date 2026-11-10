@@ -19,7 +19,15 @@ import type { TerminalCommand } from "./terminal_editor.ts"
 class Socket extends EventEmitter {
   OPEN = 1
   readyState = 1
-  send() {}
+  /** The text frames sent to the page, parsed; output is binary */
+  frames: { type: string; [k: string]: unknown }[] = []
+  send(data: unknown) {
+    if (typeof data === "string") this.frames.push(JSON.parse(data))
+  }
+  /** The lines of the cursor frames sent so far */
+  cursorLines() {
+    return this.frames.filter((f) => f.type === "cursor").map((f) => f.line as number)
+  }
   close() {
     this.readyState = 3
     this.emit("close")
@@ -143,6 +151,29 @@ describe.skipIf(!hasNvim)("the Neovim pane", { timeout: 15_000 }, () => {
     expect({ log: console.log, error: console.error, warn: console.warn }).toEqual(before)
   })
 
+  test("tells the page the line the cursor moves to, once per line", async () => {
+    const { ws, client } = await pane()
+    await client()
+    ws.post({ type: "input", data: "jjj" })
+    const lines = await eventually(
+      async () => ws.cursorLines(),
+      (l) => l.at(-1) === 3,
+    )
+    expect(lines.at(-1)).toEqual(3)
+    expect(lines.filter((line, i) => i > 0 && line === lines[i - 1])).toEqual([])
+  })
+
+  test("tells it the line a reveal moved to", async () => {
+    const { ws, client } = await pane()
+    await client()
+    ws.post({ type: "reveal", line: 49, column: 0, row: 5 })
+    const lines = await eventually(
+      async () => ws.cursorLines(),
+      (l) => l.at(-1) === 49,
+    )
+    expect(lines.at(-1)).toEqual(49)
+  })
+
   test("takes later reveals too", async () => {
     const { ws, client } = await pane()
     const nvim = await client()
@@ -173,4 +204,5 @@ test("a pane whose editor has no socket ignores a reveal", async () => {
   ws.post({ type: "reveal", line: 0, column: 0, row: 0 })
   await sleep(100)
   expect(ws.readyState).toEqual(1)
+  expect(ws.cursorLines()).toEqual([])
 })
