@@ -2,9 +2,14 @@ import { expect, test } from "vitest"
 import { GRACE_MS, Presence } from "../platform/presence.ts"
 import { Notices, type Showing, startContext } from "./notices.ts"
 
-const showing = (files: [string, boolean][] = [], dashboard = true): Showing => ({
+const showing = (
+  files: [string, boolean][] = [],
+  dashboard = true,
+  nvim = false,
+): Showing => ({
   files: files.map(([path, open]) => ({ path, agent: "a", open })),
   dashboard,
+  nvim,
 })
 
 test("a starting session is told every active tracker, the current one marked", () => {
@@ -17,6 +22,27 @@ test("a starting session is told every active tracker, the current one marked", 
     ].join("\n"),
   )
   expect(startContext(null, [])).toBeNull()
+})
+
+test("a starting session in a tab with an nvim is told so, trackers or not", () => {
+  const withTrackers = startContext("/w/b.html", ["/w/b.html"], true)!.split("\n")
+  expect(withTrackers.at(-1)).toMatch(/This tab has an nvim.*the nvim skill/)
+  expect(withTrackers[0]).toMatch(/^Active trackers/)
+  expect(startContext(null, [], true)).toMatch(/^This tab has an nvim.*the nvim skill/)
+  expect(startContext("/w/b.html", ["/w/b.html"], false)).not.toMatch(/nvim/)
+})
+
+test("an nvim coming to the agent's tab, or going, is said once", () => {
+  const n = new Notices()
+  n.start("a", null, showing([], true, false))
+  expect(n.since("a", null, showing([], true, true))).toEqual([
+    expect.stringMatching(/^ah: this tab has an nvim now.*the nvim skill/),
+  ])
+  expect(n.since("a", null, showing([], true, true))).toEqual([])
+  expect(n.since("a", null, showing([], true, false))).toEqual([
+    "ah: this tab's nvim has gone",
+  ])
+  expect(n.since("a", null, showing([], true, false))).toEqual([])
 })
 
 test("nothing changed, nothing said", () => {
@@ -70,6 +96,7 @@ test("views bound to other agents aren't this one's news", () => {
   const other: Showing = {
     files: [{ path: "/w/p.md", agent: "b", open: false }],
     dashboard: true,
+    nvim: false,
   }
   expect(n.since("a", null, other)).toEqual([])
 })

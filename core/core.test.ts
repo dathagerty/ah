@@ -376,3 +376,17 @@ test("parseEvent takes an nvim starting or ending in a pane", () => {
   expect(parseEvent({ ...event, block: null })).toBeNull()
   expect(parseEvent({ ...event, socket: "" })).toBeNull()
 })
+
+test("a session starting in a tab with an nvim is told so", async () => {
+  core.onRex(rex({ t1: ["block:1", "block:2"], t2: ["block:3"] }))
+  core.receive({
+    kind: "editor",
+    event: "start",
+    block: "block:2",
+    socket: "/tmp/nvim.2/0",
+  })
+  const here = await (await report(start("claude", "s1"))).json()
+  expect(here.context ?? "").toMatch(/This tab has an nvim/)
+  const elsewhere = await (await report(start("claude", "s2", undefined, "block:3"))).json()
+  expect(elsewhere.context ?? "").not.toMatch(/nvim/)
+})
