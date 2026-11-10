@@ -290,6 +290,55 @@ describe.skipIf(!hasNvim).concurrent("commenting to the agent", () => {
   })
 })
 
+describe.skipIf(!hasNvim).concurrent("where answers go", () => {
+  const REX = { REX_BLOCK: "block:t1" }
+
+  test("in a Rex pane, a comment on lines says the editor takes answers in quickfix", async () => {
+    const result = await inNvim({
+      file: "one\ntwo\n",
+      env: REX,
+      lua: `
+        ${setup()}
+        vim.cmd.edit(file)
+        comment("j ac", "why?")
+        return { args = sent().args, file = vim.api.nvim_buf_get_name(0) }
+      `,
+    })
+    expect(result.args).toEqual([
+      "message",
+      "send",
+      "--file",
+      result.file,
+      "--lines=2",
+      "--quickfix-answers",
+    ])
+  })
+
+  test("a comment on the whole file doesn't, nor one outside Rex", async () => {
+    const result = await inNvim({
+      file: "one\n",
+      env: REX,
+      lua: `
+        ${setup()}
+        vim.cmd.edit(file)
+        comment(" aC", "why?")
+        return { args = sent().args }
+      `,
+    })
+    expect(result.args).not.toContain("--quickfix-answers")
+    const outside = await inNvim({
+      file: "one\n",
+      lua: `
+        ${setup()}
+        vim.cmd.edit(file)
+        comment(" ac", "why?")
+        return { args = sent().args }
+      `,
+    })
+    expect(outside.args).not.toContain("--quickfix-answers")
+  })
+})
+
 describe.skipIf(!hasNvim).concurrent("the comment float", () => {
   const LINES = Array.from({ length: 100 }, (_, i) => `line ${i + 1}`).join("\n") + "\n"
 
