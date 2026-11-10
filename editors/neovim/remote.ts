@@ -54,8 +54,8 @@ function connect(path: string): Promise<Socket | null> {
 
 // TODO(david): document NvimRemote, its constructor (the socket nvim listens
 // on, which may not be there yet, and waitMs: how long to wait for it, 0 for
-// an nvim that should be listening already), ping, reveal, open, quickfix
-// and close
+// an nvim that should be listening already), ping, reveal, open, quickfix,
+// follow and close
 export class NvimRemote {
   readonly #client: Promise<NeovimClient | null>
   #closed = false
@@ -130,6 +130,18 @@ export class NvimRemote {
     open: boolean,
   ): Promise<void> {
     await this.#call("quickfix", [title, items, open])
+  }
+
+  /** Calls `onLine` with the line the cursor moves to, from now on */
+  async follow(onLine: (line: number) => void): Promise<void> {
+    const client = await this.#client
+    if (!client) throw new Error("nvim isn't listening")
+    client.on("notification", (method: string, args: unknown[]) => {
+      if (method === "ah_cursor" && Number.isInteger(args[0])) onLine(args[0] as number)
+    })
+    // This client's channel, which nvim sends the notifications on
+    const [channel] = (await client.request("nvim_get_api_info", [])) as [number, unknown]
+    await this.#call("follow", [channel])
   }
 
   close() {

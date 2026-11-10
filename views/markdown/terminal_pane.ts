@@ -30,6 +30,9 @@ export class TerminalPane implements EditorPane {
   readonly #editor: TerminalEditor
   /** For a quit editor (`:q`), which the pane restarts behind it */
   readonly #onQuit: () => void
+  /** The line the editor's cursor moved to, for an editor that says
+   * (neovim_command.ts's socket) */
+  readonly #onCursor: ((line: number) => void) | undefined
   #term: Terminal | null = null
   #ws: WebSocket | null = null
   #resizes: ResizeObserver | null = null
@@ -54,11 +57,13 @@ export class TerminalPane implements EditorPane {
     socketUrl: string,
     editor: TerminalEditor,
     onQuit: () => void,
+    onCursor?: (line: number) => void,
   ) {
     this.#host = host
     this.#socketUrl = socketUrl
     this.#editor = editor
     this.#onQuit = onQuit
+    this.#onCursor = onCursor
     DARK.addEventListener("change", this.#restyle)
     this.#start()
   }
@@ -193,6 +198,18 @@ export class TerminalPane implements EditorPane {
     }
     const type = (keys: string) => send({ type: "input", data: keys })
     ws.onmessage = (e) => {
+      // Text frames are from the backend, not the editor's output
+      if (typeof e.data === "string") {
+        let msg: unknown
+        try {
+          msg = JSON.parse(e.data)
+        } catch {
+          return
+        }
+        const { type, line } = (msg ?? {}) as { type?: unknown; line?: unknown }
+        if (type === "cursor" && Number.isInteger(line)) this.#onCursor?.(line as number)
+        return
+      }
       if (!(e.data instanceof ArrayBuffer)) return
       term.write(new Uint8Array(e.data))
       this.#outputAt = performance.now()

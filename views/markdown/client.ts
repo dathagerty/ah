@@ -18,11 +18,13 @@ import { type SourcePosition, sourcePosition } from "./source_position.ts"
 import type { EditorPane } from "./editor.ts"
 import { neovim } from "./neovim.ts"
 import { TerminalPane } from "./terminal_pane.ts"
+import { blockForLine } from "./block_for_line.ts"
 
 const preview = document.querySelector("ah-markdown")!
 const content = preview.content
 const editorHost = document.getElementById("editor-host")
 const editorToggle = document.getElementById("editor-toggle")
+const followToggle = document.getElementById("follow-toggle")
 // Selection comments go through the conversation, so both are only there
 // with chat on
 const chat = document.getElementById("popover") !== null
@@ -55,12 +57,58 @@ preview.addEventListener("closed", () => {
   document.title = `${document.title} (closed)`
 })
 
+// ---------- following the editor's cursor ----------
+
+// The preview keeps the block the editor's cursor is in on screen, scrolling
+// only when it's off it, so reading the preview while typing doesn't jump,
+// and ⌘-click, whose spot is on screen, doesn't scroll back. The toggle by
+// the editor's turns it off, remembered in this browser.
+const FOLLOW_KEY = "ah.preview-follows-cursor"
+let following = (() => {
+  try {
+    return localStorage.getItem(FOLLOW_KEY) !== "off"
+  } catch {
+    return true
+  }
+})()
+
+function setFollowing(on: boolean) {
+  following = on
+  followToggle?.setAttribute("aria-pressed", String(on))
+  try {
+    localStorage.setItem(FOLLOW_KEY, on ? "on" : "off")
+  } catch {
+    // No storage: it's on again next time
+  }
+}
+followToggle?.addEventListener("click", () => setFollowing(!following))
+followToggle?.setAttribute("aria-pressed", String(following))
+
+function followCursor(line: number) {
+  if (!following || !document.body.classList.contains("editor-shown")) return
+  const blocks = [...preview.content.querySelectorAll<HTMLElement>("[data-line]")]
+  const ranges = blocks.map(
+    (el) => el.dataset.line!.split(":").map(Number) as [number, number],
+  )
+  const i = blockForLine(ranges, line)
+  if (i === null) return
+  const box = blocks[i].getBoundingClientRect()
+  if (box.bottom > 0 && box.top < window.innerHeight) return
+  blocks[i].scrollIntoView({ block: "nearest", behavior: "smooth" })
+}
+
 // ---------- editor pane ----------
 
 // What fills the pane (editor.ts): Neovim in a terminal. The pane always
 // starts collapsed.
 const pane: EditorPane | null = editorHost
-  ? new TerminalPane(editorHost, wsUrl("editor"), neovim, () => setEditorShown(false))
+  ? new TerminalPane(
+      editorHost,
+      wsUrl("editor"),
+      neovim,
+      () => setEditorShown(false),
+      followCursor,
+    )
   : null
 
 function setEditorShown(shown: boolean) {

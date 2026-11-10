@@ -110,6 +110,15 @@ export class PtyBackend implements EditorBackend {
     // Calls into the editor over its socket, once it's listening; reveals
     // sent before then wait for it
     const remote = socket ? new NvimRemote(socket) : null
+    // The cursor's line, for the preview to follow (terminal_pane.ts), as a
+    // text frame beside the output's binary ones
+    remote
+      ?.follow((line) => {
+        if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ type: "cursor", line }))
+      })
+      .catch((e: Error) =>
+        console.error("ah: the preview can't follow the cursor:", e.message),
+      )
     console.error(
       `ah: ${command} started for ${this.file} (pid ${pty.pid}, ${cols}x${rows})`,
     )

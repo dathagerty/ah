@@ -100,7 +100,7 @@ ${chat ? chatStylesheet : ""}
     padding: 45px;
   }
   /* Its top and height center it in the diff bar, when that's shown */
-  #editor-toggle {
+  #editor-toggle, #follow-toggle {
     position: fixed;
     top: 10px;
     right: 10px;
@@ -116,16 +116,19 @@ ${chat ? chatStylesheet : ""}
     line-height: 1;
     cursor: pointer;
   }
-  #editor-toggle:hover { color: #1f2328; background: #eef1f4; }
+  #editor-toggle:hover, #follow-toggle:hover { color: #1f2328; background: #eef1f4; }
+  /* Beside the editor toggle, dim while the preview doesn't follow */
+  #follow-toggle { right: 44px; }
+  #follow-toggle[aria-pressed="false"] { opacity: 0.45; }
   @media (prefers-color-scheme: dark) {
     #editor-pane { border-right-color: #3d444d; }
-    #editor-toggle {
+    #editor-toggle, #follow-toggle {
       background: #151b23;
       border-color: #3d444d;
       color: #9198a1;
       color-scheme: dark;
     }
-    #editor-toggle:hover { color: #f0f6fc; background: #1c2330; }
+    #editor-toggle:hover, #follow-toggle:hover { color: #f0f6fc; background: #1c2330; }
   }
   /* The diff mode's base and change count, above the preview */
   #diff-bar {
@@ -371,7 +374,8 @@ ${chat ? chatStylesheet : ""}
 </div>
 ${
   editor
-    ? '<button id="editor-toggle" aria-label="Toggle editor" title="Toggle editor (⌘E)">✎</button>'
+    ? '<button id="editor-toggle" aria-label="Toggle editor" title="Toggle editor (⌘E)">✎</button>' +
+      '<button id="follow-toggle" aria-label="Preview follows the editor\'s cursor" title="Preview follows the editor\'s cursor" aria-pressed="true">⇅</button>'
     : ""
 }
 ${chat ? selectionPopover : ""}

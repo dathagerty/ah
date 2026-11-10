@@ -88,4 +88,39 @@ function M.quickfix(title, items, open)
   end
 end
 
+
+-- How often, at most, the cursor's line goes to ah
+local FOLLOW_EVERY_MS = 80
+
+-- TODO(david): document follow(channel): the markdown pane's preview follows
+-- the cursor, as the 0-based line in the buffer that's current now, sent as
+-- an ah_cursor notification on `channel` when it changes
+function M.follow(channel)
+  local buf = vim.api.nvim_get_current_buf()
+  local last
+  local function send()
+    -- Only for the pane's file, not a buffer opened over it
+    if vim.api.nvim_get_current_buf() ~= buf then return end
+    local line = vim.api.nvim_win_get_cursor(0)[1] - 1
+    if line == last then return end
+    last = line
+    pcall(vim.rpcnotify, channel, "ah_cursor", line)
+  end
+  -- The first move in a while starts the timer, and the line when it fires
+  -- goes, so the last of a run of moves always does
+  local timer, waiting = vim.uv.new_timer(), false
+  vim.api.nvim_create_autocmd({ "CursorMoved", "CursorMovedI" }, {
+    group = vim.api.nvim_create_augroup("ah_follow", { clear = true }),
+    callback = function()
+      if waiting then return end
+      waiting = true
+      timer:start(FOLLOW_EVERY_MS, 0, vim.schedule_wrap(function()
+        waiting = false
+        send()
+      end))
+    end,
+  })
+  send()
+end
+
 return M
