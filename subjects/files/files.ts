@@ -1,7 +1,7 @@
 // What a backend (markdown's, html's) keeps for files, by absolute path: the
 // conversation (Thread) of any file something asks about, and for a file a
 // page shows, its pages and whatever its type keeps live for it (markdown's
-// text and helix panes, html's reload watcher). Nothing opens a file: a page's
+// text and editor panes, html's reload watcher). Nothing opens a file: a page's
 // URL names its path, signed (subjects/id.ts), so a page that connects brings
 // up the live state, and it stops a few seconds after the last page leaves,
 // long enough for a reload. After a restart, pages reconnect on their own.

@@ -75,7 +75,8 @@ ${chat ? chatStylesheet : ""}
     height: 100vh;
     overflow: hidden;
     padding: 6px 0 6px 6px;
-    background: #020202; /* ayu_evolve background, so the pane's padding matches helix */
+    /* The terminal's background (terminal_theme.ts), so the padding matches it */
+    background: var(--term-bg, #020202);
     border-right: 1px solid #d1d9e0;
   }
   /* Hidden, the pane keeps its shown size out of the layout, so the editor

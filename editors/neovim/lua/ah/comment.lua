@@ -1,8 +1,7 @@
 -- Commenting to the agent on lines of a file, or the whole file, with
 -- `ah message send`. In a Rex pane, the comment goes to an agent in the
 -- tab; in the markdown page's pane, into the file's thread, as one made on
--- the page. Moved from the user's config as it was; editors/helix/ah.scm is
--- the Helix version.
+-- the page. Moved from the user's config.
 
 local M = {}
 
@@ -10,7 +9,7 @@ local M = {}
 local cmd = { "ah" }
 
 -- The selected text goes as an argument, so it's cut to this many
--- characters, as in Helix, to stay well under the argument size limit
+-- characters, to stay well under the argument size limit
 local MAX_SELECTION = 4000
 
 local function report(done)
@@ -81,7 +80,7 @@ end
 --
 -- With one agent in the tab, the box's title names it. With several, it
 -- starts on the pane's pick and Tab changes it; the one shown goes as
--- --agent, which makes it the pane's pick for later comments, as in Helix.
+-- --agent, which makes it the pane's pick for later comments.
 local function prompt(first, last, lines, selection)
   local file = vim.api.nvim_buf_get_name(0)
   if file == "" or vim.bo.buftype ~= "" then

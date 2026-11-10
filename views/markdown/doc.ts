@@ -3,7 +3,7 @@
 // open` until close.
 //
 // It also keeps an edit window: disk changes since the last
-// comment (helix saves, and the agent's own edits echoed back) accumulate
+// comment (the editor pane's saves, and the agent's own edits echoed back) accumulate
 // from the text they started from, and the next comment carries them as one
 // splice, so the session's picture of the file stays current without a
 // re-read and without being woken for every save.

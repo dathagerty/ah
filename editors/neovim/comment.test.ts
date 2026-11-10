@@ -621,7 +621,7 @@ describe.skipIf(!hasNvim).concurrent("the selection a comment sends", () => {
     return { selection = vim.NIL }
   `
 
-  test("is cut to 4000 characters, as Helix cuts it, to stay under the argument size limit", async () => {
+  test("is cut to 4000 characters, to stay under the argument size limit", async () => {
     const result = await inNvim({
       file: `${"a".repeat(5000)}\n`,
       lua: `${setup()} ${SELECTION}`,

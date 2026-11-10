@@ -1,6 +1,5 @@
 -- A float under some lines of a window, like a review comment, for writing
--- a comment in: editors/helix/comment-box.scm's box, in Neovim. It's a
--- scratch markdown buffer, so editing is Neovim's own.
+-- a comment in. It's a scratch markdown buffer, so editing is Neovim's own.
 --
 -- Enter sends, in insert or normal mode. Ctrl-J, Shift-Enter and Alt-Enter
 -- add a line; Ctrl-J is the one every terminal sends. Esc in insert mode

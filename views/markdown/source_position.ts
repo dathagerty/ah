@@ -1,5 +1,5 @@
 // Where in the source a spot in the rendered preview comes from, so ⌘-click
-// can put helix's cursor there (client.ts). A block's data-line gives its
+// can put the editor's cursor there (client.ts). A block's data-line gives its
 // lines; within them, the rendered text before the spot is found in the
 // source with everything but letters and digits left out of both, so markup
 // and hard wraps don't get in the way. Imports nothing, for tests.

@@ -38,14 +38,10 @@ export class TerminalPane implements EditorPane {
   #resizes: ResizeObserver | null = null
   /** Closed for good (close), so nothing restarts it */
   #closed = false
-  /** Types keys into the editor, set once it has drawn: before that it may not
-   * have the pty in raw mode yet. What needs it sooner waits in #waiters. */
-  #type: ((keys: string) => void) | null = null
-  /** Sends a message to the backend, set with #type */
+  /** Sends a message to the backend, set once the editor has drawn. What
+   * needs it sooner waits in #waiters. */
   #send: ((msg: Record<string, unknown>) => void) | null = null
   #waiters: (() => void)[] = []
-  /** When the editor last sent output, to tell when it's done drawing */
-  #outputAt = 0
   /** Repaints in the other palette when the OS switches light and dark,
    * without restarting the editor */
   readonly #restyle = () => {
@@ -85,14 +81,12 @@ export class TerminalPane implements EditorPane {
 
   /** The cursor at `line` and `column`, its line level with `y`, staying a
    * fifth of the text area from either edge, and at least the editor's
-   * scrolloff (reveal_row.ts). An editor that takes it over RPC gets it as
-   * one message to the backend; otherwise its goto is typed, and then its
-   * lower, to bring the line down to that row. */
+   * scrolloff (reveal_row.ts), as one message to the backend */
   async reveal(line: number, column: number, y: number) {
-    const type =
-      this.#type ??
-      (await new Promise<(keys: string) => void>((resolve) =>
-        this.#waiters.push(() => resolve(this.#type!)),
+    const send =
+      this.#send ??
+      (await new Promise<(msg: Record<string, unknown>) => void>((resolve) =>
+        this.#waiters.push(() => resolve(this.#send!)),
       ))
     const row = () => {
       const term = this.#term
@@ -107,27 +101,8 @@ export class TerminalPane implements EditorPane {
         scrolloff: this.#editor.scrolloff,
       })
     }
-    if (this.#editor.reveal === "rpc") {
-      this.#send?.({ type: "reveal", line, column, row: row() ?? 0 })
-      return
-    }
-    await this.#typeAndDraw(type, this.#editor.goto(line, column))
-    const target = row()
-    const top = this.#term?.buffer.active.cursorY
-    if (target !== null && top !== undefined && target > top) {
-      type(this.#editor.lower(target - top))
-    }
-  }
-
-  /** Type keys into the editor and wait until it has drawn what they did:
-   * until its output has stopped for a moment, or a second has gone by */
-  async #typeAndDraw(type: (keys: string) => void, keys: string) {
-    const sentAt = performance.now()
-    type(keys)
-    while (performance.now() - sentAt < 1000) {
-      await new Promise((resolve) => setTimeout(resolve, 20))
-      if (this.#outputAt > sentAt && performance.now() - this.#outputAt > 40) return
-    }
+    // The backend does it over the editor's RPC socket (pty.ts), from any mode
+    send({ type: "reveal", line, column, row: row() ?? 0 })
   }
 
   #start() {
@@ -148,8 +123,8 @@ export class TerminalPane implements EditorPane {
     term.loadAddon(fit)
     term.open(host)
     // The default DOM renderer can't keep up with a full-screen editor's
-    // full-viewport redraws (in Helix, holding k scrolled several times
-    // slower than in a terminal).
+    // full-viewport redraws (holding k scrolled several times slower than in
+    // a terminal).
     // WebGL renders the same output at terminal speed; if the context is lost
     // or unavailable, dispose the addon and xterm falls back to the DOM renderer.
     try {
@@ -212,9 +187,7 @@ export class TerminalPane implements EditorPane {
       }
       if (!(e.data instanceof ArrayBuffer)) return
       term.write(new Uint8Array(e.data))
-      this.#outputAt = performance.now()
-      if (this.#type !== type) {
-        this.#type = type
+      if (this.#send !== send) {
         this.#send = send
         for (const wake of this.#waiters) wake()
         this.#waiters = []
@@ -222,10 +195,7 @@ export class TerminalPane implements EditorPane {
     }
     ws.onclose = (e) => {
       if (this.#closed) return
-      if (this.#type === type) {
-        this.#type = null
-        this.#send = null
-      }
+      if (this.#send === send) this.#send = null
       // The editor quit, rather than failing to start or losing the server or
       // the file. One that quits soon after starting may be failing, and
       // restarting it could loop.
@@ -249,8 +219,7 @@ export class TerminalPane implements EditorPane {
       sendSize()
     })
     // A full-screen editor draws the alternate screen by positioning the
-    // cursor (Helix, where this was worked out, does before every write and
-    // never wraps or line feeds), so it should never scroll. When it does,
+    // cursor, without wrapping or line feeds, so it should never scroll. When it does,
     // the editor and xterm disagree about the size (or a glyph width) and
     // every row is off by one until the editor happens to rewrite it. Ask it
     // for a full redraw, which it does on any resize event. Around a resize

@@ -2,7 +2,7 @@
 
 // The editor pane when the editor runs in the page (editor.ts): CodeMirror,
 // with codemirror_backend.ts on the server to save, as an example of an
-// editor in place of Helix's terminal. It starts on the pane's first show,
+// editor in place of the terminal. It starts on the pane's first show,
 // with the file's text as the preview element has it, and stays while the
 // pane is hidden.
 //

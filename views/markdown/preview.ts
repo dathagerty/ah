@@ -3,7 +3,7 @@
 // <ah-markdown src="/view/markdown/<id>/">: the live, read-only GFM preview
 // of one open file, or its AsciiDoc rendered by Asciidoctor (asciidoc.ts),
 // as a custom element so any ah page can hold one. The
-// file page puts one next to its helix pane and comment popover (client.ts);
+// file page puts one next to its editor pane and comment popover (client.ts);
 // the dashboard holds one per workspace. Every URL is resolved against
 // `src` rather than the page's own location.
 //

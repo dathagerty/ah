@@ -1,7 +1,7 @@
 // `ah message respond` and `ah message pending`: how the agent answers a
 // page's thread; and `ah message send`, the user's comment from their editor
 // or a diff review, as a plain message to an agent in the Rex tab
-// (core/send.ts) or, from a markdown page's helix pane, into the file's
+// (core/send.ts) or, from a markdown page's editor pane, into the file's
 // thread
 
 import { existsSync, readFileSync } from "node:fs"
@@ -98,7 +98,7 @@ export function threadCommands(
       [
         "Send the user's comment to an agent, as their editor or a diff review does. The text is --text, --text-file, or stdin.",
         "In a Rex pane, or with --agent, it's a plain message. It goes to --agent if given, which also becomes this pane's pick for later sends; else to the pane's pick, or the tab's only agent. With several agents in the tab and no pick, it refuses and lists them (`ah workspace agents`). With no agent there, it waits for the next one in the tab, unless the pane closes first. With --file, ah writes the message: the file, the lines and the selection, then the text; without it, the text goes as it is, as a diff review sends its prompt.",
-        "Outside Rex, as in a markdown page's helix pane, --file is required and the comment goes into the file's thread, as one made on its page: on the selection, or the lines, or the whole file without either. It goes to the agent the file is bound to, or waits for one.",
+        "Outside Rex, as in a markdown page's editor pane, --file is required and the comment goes into the file's thread, as one made on its page: on the selection, or the lines, or the whole file without either. It goes to the agent the file is bound to, or waits for one.",
         "Prints `sent`, or `held` when it waits; on a thread, with the request's id.",
       ].join("\n\n"),
     )

@@ -1,7 +1,7 @@
 /// <reference lib="dom" />
 
 // ⌘F's find bar (#find in page.ts), over the rendered preview only: the
-// helix pane, the chat and the rest of the page aren't searched. Matches are
+// editor pane, the chat and the rest of the page aren't searched. Matches are
 // marked by boxes in an overlay (#find-marks) at their text's client rects,
 // so the preview's DOM, which selection comments anchor on, stays as
 // rendered. (Not CSS custom highlights: WebKit paints their background the
@@ -201,7 +201,7 @@ export function setUpFind(content: HTMLElement) {
       close()
     }
   })
-  // From anywhere on the page: helix's pane passes on the ⌘-chords it doesn't
+  // From anywhere on the page: the editor pane passes on the ⌘-chords it doesn't
   // bind (client.ts), and ⌘F would otherwise open the browser's own find
   document.addEventListener("keydown", (e) => {
     if (!e.metaKey || e.ctrlKey || e.altKey) return

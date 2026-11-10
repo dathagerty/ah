@@ -4,7 +4,7 @@
 // also lists what pages show, `files?path=` closes a file's windows,
 // `files/thread?path=` is any file's thread, for the agent's replies (`ah
 // message respond`) and what's pending, and `files/request?path=` takes a
-// request into it from outside the page: the helix pane in a markdown page
+// request into it from outside the page: the editor pane in a markdown page
 // (`ah message send`). A file's page lives at <id>/, the
 // signed id that names its path (subjects/id.ts), and the backend handles
 // everything under it. Ids always have a `~`, so they can't collide with the

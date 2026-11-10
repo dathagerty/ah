@@ -114,7 +114,7 @@ describe("the API and pages ports", () => {
       body: JSON.stringify({ kind: "chat", text: "hello" }),
     })
     expect(request.status).toEqual(200)
-    // Or from outside the page, like the helix pane, through the API port
+    // Or from outside the page, like the editor pane, through the API port
     const fromOutside = `files/request?path=${encodeURIComponent(join(dir, "report.html"))}`
     const comment = {
       method: "POST",

@@ -39,7 +39,7 @@ test("a pane asked for after the file closed never starts the editor", async () 
   const dir = mkdtempSync(join(tmpdir(), "ah-pty-"))
   const file = join(dir, "notes.md")
   writeFileSync(file, "# notes\n")
-  const panes = new PtyBackend(file, async () => ({ command: "hx", args: [file] }))
+  const panes = new PtyBackend(file, async () => ({ command: "nvim", args: [file] }))
   panes.close()
   let closed = false
   const ws = {

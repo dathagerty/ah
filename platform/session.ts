@@ -62,7 +62,7 @@ const SESSION_ENV = [
 ]
 
 /** For the server, which belongs to no session: it inherits the env of
- * whichever one started it, and anything it runs (a shell in a helix pane)
+ * whichever one started it, and anything it runs (a shell in the editor pane)
  * would otherwise think it's in that session */
 export function scrubSessionEnv(env: NodeJS.ProcessEnv) {
   for (const name of SESSION_ENV) delete env[name]

@@ -37,7 +37,7 @@ Selections are quoted from the rendered text, not the source, with up to 60 char
 
 ### Edit notices
 
-On a markdown file, a request can be preceded by a context line describing how the file changed on disk since the last request. This covers both your own saves in Helix and the agent's edits (`views/markdown/doc.ts`):
+On a markdown file, a request can be preceded by a context line describing how the file changed on disk since the last request. This covers both your own saves in the editor pane and the agent's edits (`views/markdown/doc.ts`):
 
 ```
 Edit notice: since the last request, the file on disk replaced "<old>" with "<new>" after "<40 characters before>"
@@ -53,7 +53,7 @@ If you submit a request when no agent is reachable, the request waits in the thr
 
 ## Comments sent to a tab
 
-`ah message send` sends a message to an agent running in the current Rex terminal tab. This is how the Neovim and Helix comment commands talk to the agent ([neovim.md](neovim.md), [helix.md](helix.md)). If the tab has several agents, the message goes to the one named with `--agent` (an ID from `ah workspace agents`), which also becomes the pane's pick for later sends. Without `--agent`, it goes to the pane's pick. With neither, the command refuses and lists the agents. The comment text comes from `--text`, `--text-file`, or stdin. The message starts with a line telling the agent where the message came from. If `--file` is passed, the next line says where the comment is located (`core/core.ts`, `subjects/thread/cli.ts`):
+`ah message send` sends a message to an agent running in the current Rex terminal tab. This is how the Neovim comment commands talk to the agent ([neovim.md](neovim.md)). If the tab has several agents, the message goes to the one named with `--agent` (an ID from `ah workspace agents`), which also becomes the pane's pick for later sends. Without `--agent`, it goes to the pane's pick. With neither, the command refuses and lists the agents. The comment text comes from `--text`, `--text-file`, or stdin. The message starts with a line telling the agent where the message came from. If `--file` is passed, the next line says where the comment is located (`core/core.ts`, `subjects/thread/cli.ts`):
 
 ````
 From the user, through ah: treat it as typed here and answer in the terminal, not with SendMessage.

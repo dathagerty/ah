@@ -4,6 +4,5 @@ While the top-level README is hand-written artisanal prose, these docs, especial
 
 - [Setup](setup.md)
 - [Neovim](neovim.md)
-- [Helix](helix.md)
 - [Swapping out the editor](other-editors.md)
 - [Messages](messages.md)

@@ -278,7 +278,7 @@ guard let options = parseOptions(Array(CommandLine.arguments.dropFirst())) else 
   FileHandle.standardError.write("usage: ah-webview --url URL [--focus] [--other-display] [--badge TEXT] [--color HEX]\n".data(using: .utf8)!)
   exit(2)
 }
-// Held keys repeat, as in a terminal, so holding j in the Helix pane keeps
+// Held keys repeat, as in a terminal, so holding j in the editor pane keeps
 // moving instead of opening the accent picker
 UserDefaults.standard.register(defaults: ["ApplePressAndHoldEnabled": false])
 let app = NSApplication.shared

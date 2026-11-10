@@ -1,12 +1,8 @@
 # Swapping out the editor
 
-`ah` is not tied to any one editor. The markdown editor's editor pane runs Neovim, with `ah`'s plugin ([neovim.md](neovim.md)), but you can have your coding agent swap in whatever editor you prefer. My original prototype of the markdown editor used [CodeMirror](https://codemirror.net/) and it worked great. Besides Neovim, `ah` has adapters for Helix and CodeMirror. The CodeMirror one has had only light testing.
+`ah` is not tied to any one editor. The markdown editor's editor pane runs Neovim, with `ah`'s plugin ([neovim.md](neovim.md)), but you can have your coding agent swap in whatever editor you prefer. My original prototype of the markdown editor used [CodeMirror](https://codemirror.net/) and it worked great. Besides Neovim, `ah` has a sample adapter for CodeMirror, which has had only light testing.
 
 There's no setting to pick the editor. [`views/markdown/editor.ts`](../views/markdown/editor.ts) describes what fills the pane: a backend on the server and a component in the page. To switch, select the backend in [`files.ts`](../views/markdown/files.ts) and the page component in [`client.ts`](../views/markdown/client.ts).
-
-## Helix
-
-[`helix_command.ts`](../views/markdown/helix_command.ts) and [`helix.ts`](../views/markdown/helix.ts) are Helix's halves. Import them in `files.ts` and `client.ts` in place of `neovim_command.ts` and `neovim.ts`. Taking the agent's edits and sending comments need Helix built with Steel and `ah`'s Steel modules; see [helix.md](helix.md).
 
 ## CodeMirror
 
@@ -14,7 +10,7 @@ CodeMirror runs in the page instead of in a terminal. [`codemirror_backend.ts`](
 
 ## Another terminal editor
 
-[`terminal_editor.ts`](../views/markdown/terminal_editor.ts) describes what the terminal needs from the editor running in it. To use a different terminal editor, implement its server and page halves and pick them in `files.ts` and `client.ts`. [`neovim.ts`](../views/markdown/neovim.ts) and [`neovim_command.ts`](../views/markdown/neovim_command.ts) do this for Neovim. Like the Helix pane, it auto-saves and merges the agent's edits into unsaved text with `ah view merge`.
+[`terminal_editor.ts`](../views/markdown/terminal_editor.ts) describes what the terminal needs from the editor running in it. To use a different terminal editor, implement its server and page halves and pick them in `files.ts` and `client.ts`. [`neovim.ts`](../views/markdown/neovim.ts) and [`neovim_command.ts`](../views/markdown/neovim_command.ts) do this for Neovim: it auto-saves, and merges the agent's edits into unsaved text with `ah view merge`. The page's ⌘-click and the preview following the cursor go over Neovim's RPC socket (`pty.ts`), so another editor would need its own way to do those.
 
 ## No editor pane
 

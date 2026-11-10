@@ -3,7 +3,7 @@
 // the dashboard shows. The extension picks the backend that serves the page:
 // an .html file is the agent's own page, served as is on an origin of its own
 // (views/html/); anything else is markdown or AsciiDoc, rendered by ah with a
-// helix pane (views/markdown/). Showing, listing and closing (subjects/files/), the thread
+// editor pane (views/markdown/). Showing, listing and closing (subjects/files/), the thread
 // (subjects/thread/) and the dashboard record are the same for both.
 
 import { spawn } from "node:child_process"
