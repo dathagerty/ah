@@ -111,9 +111,13 @@ export function threadCommands(
     )
     .option("--text <text>", "The comment")
     .option("--text-file <path>", "Read the comment from a file")
+    .option(
+      "--quickfix-answers",
+      "The editor takes answers at the lines in the tab's nvim (ah's nvim plugin), so the message says so",
+    )
     .addOption(portOption())
     .action(async (opts) => {
-      const { agent, selection, text: inline, textFile, port } = opts
+      const { agent, selection, text: inline, textFile, port, quickfixAnswers } = opts
       const text = (
         inline ?? (textFile ? readFileSync(textFile, "utf8") : await readStdin())
       )?.trim()
@@ -124,7 +128,9 @@ export function threadCommands(
       if (lines && !path) die("ah message send: --lines needs --file")
       const block = process.env.REX_BLOCK ?? null
       if (block || agent) {
-        const message = path ? comment(path, lines, selection ?? null, text) : text
+        const message = path
+          ? comment(path, lines, selection ?? null, text, { quickfixAnswers })
+          : text
         const status = await sendToTab(port, block, agent ?? null, message)
         return console.log(
           status === "sent"
@@ -187,6 +193,7 @@ export function comment(
   lines: Lines | null,
   selection: string | null,
   text: string,
+  { quickfixAnswers = false }: { quickfixAnswers?: boolean } = {},
 ): string {
   const place = !lines
     ? path
@@ -196,5 +203,11 @@ export function comment(
   const quote = selection
     ? `, selecting:\n\`\`\`\n${selection.trimEnd()}\n\`\`\`\n\n`
     : ":\n\n"
-  return `A comment from the user on ${place}${quote}${text}`
+  // From an editor whose tab's nvim takes answers at the lines (the nvim
+  // skill), the moment the skill is least likely to have loaded
+  const hint =
+    quickfixAnswers && lines
+      ? "\n\n(If your answer is about these lines, put its gist in the `answers` quickfix list in the tab's nvim too: the nvim skill.)"
+      : ""
+  return `A comment from the user on ${place}${quote}${text}${hint}`
 }

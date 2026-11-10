@@ -33,6 +33,9 @@ function M.send(file, text, lines, selection, agent)
     table.insert(args, "--selection=" .. vim.fn.strcharpart(selection, 0, MAX_SELECTION))
   end
   if agent then vim.list_extend(args, { "--agent", agent }) end
+  -- In a Rex pane, an answer about the lines can go in the tab's nvim too
+  -- (the nvim skill), which the message then says
+  if lines and (vim.env.REX_BLOCK or "") ~= "" then table.insert(args, "--quickfix-answers") end
   local ok, err = pcall(vim.system, args, { stdin = text, text = true }, vim.schedule_wrap(report))
   if not ok then vim.notify("ah: couldn't run ah: " .. tostring(err), vim.log.levels.ERROR) end
 end
