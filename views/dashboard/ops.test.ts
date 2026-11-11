@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterAll, beforeAll, describe, expect, test } from "vitest"
+import { MAIN } from "./jj.ts"
 import { readDescription, resolveOp, runOp } from "./ops.ts"
 
 const OP_ID = "5dd5c50018c2a1b3"
@@ -88,6 +89,17 @@ test("reading a description takes only a change ID too", async () => {
     })
 })
 
+test("fetch fetches from the remote", () => {
+  expect(resolveOp({ op: "fetch" })).toEqual({ ok: true, args: ["git", "fetch"] })
+})
+
+test("rebase moves the workspace's stack, from its roots past main, onto main", () => {
+  expect(resolveOp({ op: "rebase" })).toEqual({
+    ok: true,
+    args: ["rebase", "-s", `roots(${MAIN}..@)`, "-d", MAIN],
+  })
+})
+
 const hasJj = spawnSync("jj", ["--version"]).status === 0
 
 describe.skipIf(!hasJj)("runOp in a real repo", () => {
@@ -124,6 +136,12 @@ describe.skipIf(!hasJj)("runOp in a real repo", () => {
   test("an operation that works gives back the ID of the operation it made, for Undo", async () => {
     const result = await runOp(repo, ["describe", "-m", "from the dashboard"])
     expect(result).toEqual({ ok: true, operation: latestOp() })
+  })
+
+  test("an operation that changes nothing gives nothing to undo, not the operation before it", async () => {
+    // jj says "Nothing changed." and records no operation
+    const result = await runOp(repo, ["describe", "-m", "from the dashboard"])
+    expect(result).toEqual({ ok: true, operation: null })
   })
 
   test("an operation that fails gives back jj's message, without color, for the toast", async () => {
@@ -196,5 +214,70 @@ describe.skipIf(!hasJj)("runOp in a real repo", () => {
         ok: false,
       })
     })
+  })
+})
+
+describe.skipIf(!hasJj)("catching up with the remote", () => {
+  let dir: string
+  let origin: string
+  let clone: string
+  const savedConfig = process.env.JJ_CONFIG
+
+  const jjIn = (cwd: string, ...args: string[]) =>
+    execFileSync("jj", args, { cwd, stdio: "pipe", encoding: "utf8" })
+  const parentOf = (rev: string) =>
+    jjIn(clone, "log", "-r", `${rev}-`, "--no-graph", "-T", "description").trim()
+  const run = async (body: object) => {
+    const op = resolveOp(body)
+    if (!op.ok) throw new Error(op.error)
+    return await runOp(clone, op.args)
+  }
+
+  beforeAll(() => {
+    dir = mkdtempSync(join(tmpdir(), "ah-ops-remote-"))
+    origin = join(dir, "origin")
+    clone = join(dir, "clone")
+    const config = join(dir, "config.toml")
+    writeFileSync(
+      config,
+      ["[user]", 'name = "Test"', 'email = "test@example.com"'].join("\n"),
+    )
+    process.env.JJ_CONFIG = config
+    execFileSync("jj", ["git", "init", origin], { stdio: "pipe" })
+    writeFileSync(join(origin, "a.txt"), "a\n")
+    jjIn(origin, "commit", "-m", "old main")
+    jjIn(origin, "bookmark", "create", "main", "-r", "@-")
+    execFileSync("jj", ["git", "clone", origin, clone], { stdio: "pipe" })
+
+    // The work, on the old main
+    jjIn(clone, "new", "main", "-m", "work")
+    writeFileSync(join(clone, "b.txt"), "b\n")
+    jjIn(clone, "new", "-m", "more work")
+
+    // Main moves on at the remote
+    writeFileSync(join(origin, "c.txt"), "c\n")
+    jjIn(origin, "commit", "-m", "new main")
+    jjIn(origin, "bookmark", "set", "main", "-r", "@-")
+  })
+
+  afterAll(() => {
+    if (savedConfig === undefined) delete process.env.JJ_CONFIG
+    else process.env.JJ_CONFIG = savedConfig
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test("fetch then rebase puts the whole stack on the new main", async () => {
+    expect(await run({ op: "fetch" })).toMatchObject({ ok: true })
+    expect(await run({ op: "rebase" })).toMatchObject({ ok: true })
+    expect(parentOf("@")).toBe("work")
+    expect(parentOf("@-")).toBe("new main")
+  })
+
+  test("rebasing again, with the stack already on main, gives nothing to undo", async () => {
+    expect(await run({ op: "rebase" })).toEqual({ ok: true, operation: null })
+  })
+
+  test("fetching with nothing new gives nothing to undo", async () => {
+    expect(await run({ op: "fetch" })).toEqual({ ok: true, operation: null })
   })
 })

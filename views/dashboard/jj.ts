@@ -26,11 +26,14 @@ const LOG_LIMIT = "50"
  * which lists every file in it */
 export const MAX_FILES = 50
 
+// TODO(david): doc
+export const MAIN = "coalesce(present(main), trunk())"
+
 const FILES_LABEL = "Changes since main:\n"
 
 // From the fork point, not main itself: a main that moved on along a
 // sibling branch would otherwise show its own commits as reversed changes
-const FILES_BASE = "fork_point(coalesce(present(main), trunk()) | @)"
+const FILES_BASE = `fork_point(${MAIN} | @)`
 
 // One line per file, each a link the page opens (a removed file has nothing
 // to open). A rename shows both paths and links the new one.

@@ -568,9 +568,16 @@ describeForm.addEventListener("keydown", (e) => {
 byId("describe-save").addEventListener("click", saveDescribe)
 byId("describe-cancel").addEventListener("click", closeDescribe)
 
-byId("op-new").addEventListener("click", () => {
-  if (state.focused) void jjOp(state.focused, "jj new", { op: "new" })
-})
+// Whole-repo operations, over the log
+const repoOps: [string, string, string][] = [
+  ["op-new", "jj new", "new"],
+  ["op-fetch", "jj git fetch", "fetch"],
+  ["op-rebase", "Rebase onto main", "rebase"],
+]
+for (const [id, label, op] of repoOps)
+  byId(id).addEventListener("click", () => {
+    if (state.focused) void jjOp(state.focused, label, { op })
+  })
 
 logPane.addEventListener("click", (e) => {
   const a = (e.target as Element).closest<HTMLElement>("a[data-file], a[data-rev]")
@@ -607,7 +614,11 @@ let toastTimer: ReturnType<typeof setTimeout> | undefined
 
 function showToast(
   text: string,
-  { error = false, undo }: { error?: boolean; undo?: () => void } = {},
+  {
+    error = false,
+    undo,
+    running = false,
+  }: { error?: boolean; undo?: () => void; running?: boolean } = {},
 ) {
   clearTimeout(toastTimer)
   const close = () => (opToast.hidden = true)
@@ -618,7 +629,8 @@ function showToast(
   opToast.replaceChildren(el("div", { className: "op-toast-text" }, text), ...buttons)
   opToast.classList.toggle("error", error)
   opToast.hidden = false
-  if (!error) toastTimer = setTimeout(close, TOAST_MS)
+  // Errors stay until closed; a running one until it's replaced by how it went
+  if (!error && !running) toastTimer = setTimeout(close, TOAST_MS)
 }
 
 /** `label` says what ran, as the toast shows it; `body` is ops.ts's */
@@ -627,6 +639,7 @@ async function jjOp(
   label: string,
   body: { op: string; [key: string]: unknown },
 ) {
+  showToast(`${label}…`, { running: true })
   let res: Response
   try {
     res = await fetch("jj-op", { method: "POST", body: JSON.stringify({ tab, ...body }) })
@@ -634,7 +647,9 @@ async function jjOp(
     return showToast(`${label}: ${e instanceof Error ? e.message : e}`, { error: true })
   }
   if (!res.ok) return showToast(await res.text(), { error: true })
-  const { operation }: { operation: string } = await res.json()
+  // null when jj changed nothing, and recorded no operation to undo
+  const { operation }: { operation: string | null } = await res.json()
+  if (operation === null) return showToast(`${label}: nothing changed`)
   // An undo is itself an operation, but undoing it is the terminal's job
   if (body.op === "undo") return showToast(label)
   showToast(label, {

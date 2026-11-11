@@ -6,6 +6,7 @@
 
 import { basename } from "node:path"
 import type { Tab } from "../../core/model.ts"
+import { MAIN } from "./jj.ts"
 
 /** A pane to run an opener as */
 export interface Pane {
@@ -59,7 +60,7 @@ export function skepsisLaunch(
   ah: string[],
   skepsis: string,
 ): Launch {
-  const from = `fork_point(coalesce(present(main), trunk()) | ${rev})`
+  const from = `fork_point(${MAIN} | ${rev})`
   return skepsisDiffLaunch(from, rev, root, pane, port, ah, skepsis)
 }
 

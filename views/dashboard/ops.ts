@@ -2,6 +2,7 @@
 // (resolveOp), and running it in the tab's workspace (runOp).
 
 import { run } from "../../platform/proc.ts"
+import { MAIN } from "./jj.ts"
 import { CHANGE_ID } from "./links.ts"
 
 // TODO(david): doc
@@ -15,7 +16,9 @@ export type DescriptionResult =
   | { ok: false; status: 400 | 502; error: string }
 
 // TODO(david): doc
-export type RunResult = { ok: true; operation: string } | { ok: false; error: string }
+export type RunResult =
+  | { ok: true; operation: string | null }
+  | { ok: false; error: string }
 
 /** jj's operation IDs, full or short. Only these reach jj from the page, so
  * nothing else does: no op expressions (`@-`), no flags. */
@@ -52,6 +55,9 @@ export function resolveOp(body: unknown): OpResult {
     // With `=`, a description starting with `-` isn't taken for a flag
     return { ok: true, args: ["describe", "-r", change, `--message=${description}`] }
   }
+  if (op === "fetch") return { ok: true, args: ["git", "fetch"] }
+  if (op === "rebase")
+    return { ok: true, args: ["rebase", "-s", `roots(${MAIN}..@)`, "-d", MAIN] }
   if (op === "undo") {
     if (typeof operation !== "string" || !OPERATION_ID.test(operation))
       return refuse("not an operation ID")
@@ -102,24 +108,38 @@ export async function readDescription(
 // TODO(david): doc
 export async function runOp(root: string, args: string[]): Promise<RunResult> {
   try {
+    // Snapshotting here, so the operation's own snapshot of edits since
+    // isn't taken for it when it changes nothing else
+    const before = await opHead(root, { snapshot: true })
+    if (!before.ok) return before
     const ran = await run("jj", ["--color", "never", ...args], { cwd: root })
     if (!ran.success)
       return { ok: false, error: ran.stderr.trim() || `jj exited with ${ran.code}` }
     // HACK: the latest operation, read right after. One that lands in
     // between (an agent's, a snapshot) would be taken for this one.
-    const log = await run(
-      "jj",
-      ["--ignore-working-copy", "op", "log", "-n", "1", "--no-graph", "-T", "id"],
-      { cwd: root },
-    )
-    const operation = log.stdout.trim()
-    if (!log.success || !operation)
+    const after = await opHead(root, { snapshot: false })
+    if (!after.ok)
       return {
         ok: false,
-        error: `jj ran, but its operation can't be found to undo: ${log.stderr.trim()}`,
+        error: `jj ran, but its operation can't be found to undo: ${after.error}`,
       }
-    return { ok: true, operation }
+    // jj records no operation when nothing changed
+    return { ok: true, operation: after.id === before.id ? null : after.id }
   } catch (e) {
     return { ok: false, error: message(e) }
   }
+}
+
+async function opHead(
+  root: string,
+  { snapshot }: { snapshot: boolean },
+): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
+  const args = ["op", "log", "-n", "1", "--no-graph", "-T", "id"]
+  const log = await run("jj", snapshot ? args : ["--ignore-working-copy", ...args], {
+    cwd: root,
+  })
+  const id = log.stdout.trim()
+  if (!log.success || !id)
+    return { ok: false, error: log.stderr.trim() || `jj exited with ${log.code}` }
+  return { ok: true, id }
 }
