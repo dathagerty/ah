@@ -10,34 +10,47 @@ export type OpResult =
   | { ok: false; status: 400; error: string }
 
 // TODO(david): doc
+export type DescriptionResult =
+  | { ok: true; description: string }
+  | { ok: false; status: 400 | 502; error: string }
+
+// TODO(david): doc
 export type RunResult = { ok: true; operation: string } | { ok: false; error: string }
 
 /** jj's operation IDs, full or short. Only these reach jj from the page, so
  * nothing else does: no op expressions (`@-`), no flags. */
 const OPERATION_ID = /^[0-9a-f]+$/
 
+/** The one commit a change ID from the page names, as a revset: by change
+ * ID, since a bare symbol would be a bookmark of that name first, and
+ * exactly one, since jj takes a change that's gone as nothing to do and a
+ * divergent one as several. Null for anything but a change ID. */
+const target = (rev: unknown) =>
+  typeof rev === "string" && CHANGE_ID.test(rev) ? `exactly(change_id(${rev}), 1)` : null
+
 const refuse = (error: string): OpResult => ({ ok: false, status: 400, error })
 
 // TODO(david): doc
 export function resolveOp(body: unknown): OpResult {
   if (typeof body !== "object" || body === null) return refuse("not an operation")
-  const { op, operation, rev } = body as {
+  const { op, operation, rev, description } = body as {
     op?: unknown
     operation?: unknown
     rev?: unknown
+    description?: unknown
   }
-  // As a revset that's only a change ID: a bare symbol would be a bookmark
-  // of that name first
-  const change = () =>
-    typeof rev === "string" && CHANGE_ID.test(rev) ? `change_id(${rev})` : null
+  const change = target(rev)
   if (op === "new") {
     if (rev === undefined) return { ok: true, args: ["new"] }
-    const target = change()
-    return target ? { ok: true, args: ["new", target] } : refuse("not a change ID")
+    return change ? { ok: true, args: ["new", change] } : refuse("not a change ID")
   }
-  if (op === "edit") {
-    const target = change()
-    return target ? { ok: true, args: ["edit", target] } : refuse("not a change ID")
+  if (op === "edit")
+    return change ? { ok: true, args: ["edit", change] } : refuse("not a change ID")
+  if (op === "describe") {
+    if (!change) return refuse("not a change ID")
+    if (typeof description !== "string") return refuse("a description is text")
+    // With `=`, a description starting with `-` isn't taken for a flag
+    return { ok: true, args: ["describe", "-r", change, `--message=${description}`] }
   }
   if (op === "undo") {
     if (typeof operation !== "string" || !OPERATION_ID.test(operation))
@@ -49,6 +62,42 @@ export function resolveOp(body: unknown): OpResult {
 }
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e))
+
+// TODO(david): doc
+export async function readDescription(
+  root: string,
+  rev: string,
+): Promise<DescriptionResult> {
+  const change = target(rev)
+  if (!change) return { ok: false, status: 400, error: "not a change ID" }
+  try {
+    const read = await run(
+      "jj",
+      [
+        "--ignore-working-copy",
+        "--color",
+        "never",
+        "log",
+        "-r",
+        change,
+        "--no-graph",
+        "-T",
+        "description",
+      ],
+      { cwd: root },
+    )
+    if (!read.success)
+      return {
+        ok: false,
+        status: 502,
+        error: read.stderr.trim() || `jj exited with ${read.code}`,
+      }
+    // jj ends a description with a newline, and adds one again on describe
+    return { ok: true, description: read.stdout.replace(/\n+$/, "") }
+  } catch (e) {
+    return { ok: false, status: 502, error: message(e) }
+  }
+}
 
 // TODO(david): doc
 export async function runOp(root: string, args: string[]): Promise<RunResult> {

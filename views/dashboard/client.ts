@@ -475,19 +475,20 @@ window.addEventListener("blur", closeOpenMenu)
 function showRevMenu(e: MouseEvent, rev: string) {
   const tab = state.focused
   if (!tab) return
-  const choices: [string, string, { op: string; rev: string }][] = [
-    ["New on top", `jj new ${rev}`, { op: "new", rev }],
-    ["Edit", `jj edit ${rev}`, { op: "edit", rev }],
+  const choices: [string, () => void][] = [
+    ["New on top", () => void jjOp(tab, `jj new ${rev}`, { op: "new", rev })],
+    ["Edit", () => void jjOp(tab, `jj edit ${rev}`, { op: "edit", rev })],
+    ["Describe…", () => void openDescribe(tab, rev)],
   ]
   openMenu.replaceChildren(
     el("div", { className: "open-menu-file" }, rev),
-    ...choices.map(([label, ran, body]) =>
+    ...choices.map(([label, act]) =>
       el(
         "button",
         {
           onclick: () => {
             openMenu.hidePopover()
-            void jjOp(tab, ran, body)
+            act()
           },
         },
         label,
@@ -507,6 +508,65 @@ logPane.addEventListener("contextmenu", (e) => {
   if (file) showOpenMenu(e, file)
   else if (rev) showRevMenu(e, rev)
 })
+
+// The describe dialog, filled with the change's description (ops.ts
+// readDescription). Enter is a new line, for a body; ⌘↵ saves. A manual
+// popover, so a stray click outside doesn't lose what's typed: Esc or
+// Cancel closes it.
+const describeForm = byId("describe-form")
+const describeFor = byId("describe-for")
+const describeText = byId("describe-text") as HTMLTextAreaElement
+let describing: { tab: string; rev: string } | null = null
+
+async function openDescribe(tab: string, rev: string) {
+  let res: Response
+  try {
+    res = await fetch("jj-description", {
+      method: "POST",
+      body: JSON.stringify({ tab, rev }),
+    })
+  } catch (e) {
+    return showToast(`Can't read ${rev}: ${e instanceof Error ? e.message : e}`, {
+      error: true,
+    })
+  }
+  if (!res.ok) return showToast(await res.text(), { error: true })
+  const { description }: { description: string } = await res.json()
+  describing = { tab, rev }
+  describeFor.textContent = `Describe ${rev}`
+  describeText.value = description
+  describeForm.showPopover()
+  describeText.focus()
+  // At the end of the first line, where an edit to the subject starts
+  const newline = description.indexOf("\n")
+  const at = newline < 0 ? description.length : newline
+  describeText.setSelectionRange(at, at)
+}
+
+function closeDescribe() {
+  describing = null
+  describeForm.hidePopover()
+}
+
+function saveDescribe() {
+  if (!describing) return
+  const { tab, rev } = describing
+  const description = describeText.value
+  closeDescribe()
+  void jjOp(tab, `jj describe ${rev}`, { op: "describe", rev, description })
+}
+
+describeText.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+    e.preventDefault()
+    saveDescribe()
+  }
+})
+describeForm.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeDescribe()
+})
+byId("describe-save").addEventListener("click", saveDescribe)
+byId("describe-cancel").addEventListener("click", closeDescribe)
 
 byId("op-new").addEventListener("click", () => {
   if (state.focused) void jjOp(state.focused, "jj new", { op: "new" })

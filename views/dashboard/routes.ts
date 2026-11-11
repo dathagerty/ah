@@ -27,7 +27,7 @@ import { Presence } from "../../platform/presence.ts"
 import { openFloat, selectTab } from "../../platform/rex.ts"
 import { closeWindows } from "../../platform/window.ts"
 import { LogWatcher, SnapshotWatcher } from "./jj.ts"
-import { resolveOp, runOp } from "./ops.ts"
+import { readDescription, resolveOp, runOp } from "./ops.ts"
 import { detectRunners } from "./tests/detect.ts"
 import { listTests, runTests } from "./tests/run.ts"
 import { TestsWatcher } from "./tests/watcher.ts"
@@ -340,6 +340,8 @@ export class Dashboard {
     if (rest === "tracker" && req.method === "POST") return await this.#pickTracker(req)
     if (rest === "open" && req.method === "POST") return await this.#openLink(req)
     if (rest === "jj-op" && req.method === "POST") return await this.#jjOp(req)
+    if (rest === "jj-description" && req.method === "POST")
+      return await this.#jjDescription(req)
     if (rest === "tests" && req.method === "POST") return await this.#testsRequest(req)
     if (rest === "new-tracker" && req.method === "POST") return await this.#newTracker(req)
     if (rest === "prs" && req.method === "POST") return await this.#prsRequest(req)
@@ -1044,6 +1046,17 @@ export class Dashboard {
     const result = await runOp(tab.root, op.args)
     if (!result.ok) return new Response(result.error, { status: 502 })
     return Response.json({ operation: result.operation })
+  }
+
+  /** A change's description, to fill the describe dialog with (ops.ts) */
+  async #jjDescription(req: Request): Promise<Response> {
+    const { tab: id, rev }: { tab?: unknown; rev?: unknown } = await req.json()
+    const tab = this.#state.tabs.find((t) => t.id === id)
+    if (!tab) return new Response("no such tab", { status: 404 })
+    if (typeof rev !== "string") return new Response("not a change ID", { status: 400 })
+    const result = await readDescription(tab.root, rev)
+    if (!result.ok) return new Response(result.error, { status: result.status })
+    return Response.json({ description: result.description })
   }
 
   /** Open a file or change from a link in a tab's jj log, for a click on it */

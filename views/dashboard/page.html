@@ -647,6 +647,50 @@
         color: var(--accent);
         border-color: var(--accent);
       }
+      /* The describe dialog, centered, as the browser places a popover
+         (client.ts) */
+      #describe-form {
+        width: min(80ch, calc(100vw - 32px));
+        padding: 10px;
+        border: 1px solid var(--border);
+        border-radius: 5px;
+        background: var(--bg);
+        color: var(--text);
+        box-shadow: 0 4px 12px rgb(0 0 0 / 0.3);
+      }
+      #describe-for,
+      .describe-note {
+        color: var(--muted);
+        font-size: 0.9em;
+      }
+      #describe-for {
+        margin-bottom: 6px;
+      }
+      #describe-text {
+        display: block;
+        box-sizing: border-box;
+        width: 100%;
+        resize: vertical;
+        font: inherit;
+        padding: 6px 8px;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        background: var(--surface);
+        color: var(--text);
+      }
+      #describe-form button {
+        font: inherit;
+        padding: 2px 12px;
+        border-radius: 5px;
+        border: 1px solid var(--border);
+        background: none;
+        color: var(--muted);
+        cursor: pointer;
+      }
+      #describe-form #describe-save {
+        background: var(--accent-bg);
+        color: var(--accent);
+      }
       #new-tracker {
         flex: none;
         padding: 2px 9px;
@@ -776,6 +820,22 @@
     </main>
     <div id="open-menu" popover="manual"></div>
     <div id="op-toast" role="status" hidden></div>
+    <div id="describe-form" popover="manual">
+      <div id="describe-for"></div>
+      <textarea
+        id="describe-text"
+        rows="10"
+        spellcheck="false"
+        aria-label="Description"
+      ></textarea>
+      <div class="new-tracker-row">
+        <span class="describe-note">↵ new line · ⌘↵ saves · esc closes</span>
+        <span>
+          <button id="describe-cancel">Cancel</button>
+          <button id="describe-save">Save</button>
+        </span>
+      </div>
+    </div>
     <div id="new-tracker-form" popover>
       <div id="new-tracker-for"></div>
       <textarea

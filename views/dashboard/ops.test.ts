@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterAll, beforeAll, describe, expect, test } from "vitest"
-import { resolveOp, runOp } from "./ops.ts"
+import { readDescription, resolveOp, runOp } from "./ops.ts"
 
 const OP_ID = "5dd5c50018c2a1b3"
 
@@ -32,12 +32,12 @@ test("a body that isn't an object is refused", () => {
 })
 
 const REV = "kxyzqrst"
+// One commit, by change ID: not a bookmark of that name, and an error when
+// the change is gone or divergent rather than nothing done or a merge made
+const TARGET = `exactly(change_id(${REV}), 1)`
 
-test("new on a change starts one on top of it, named as a change ID so a bookmark can't stand in", () => {
-  expect(resolveOp({ op: "new", rev: REV })).toEqual({
-    ok: true,
-    args: ["new", `change_id(${REV})`],
-  })
+test("new on a change starts one on top of it", () => {
+  expect(resolveOp({ op: "new", rev: REV })).toEqual({ ok: true, args: ["new", TARGET] })
 })
 
 test("new with no change starts one on top of the working copy, for the button", () => {
@@ -45,20 +45,47 @@ test("new with no change starts one on top of the working copy, for the button",
 })
 
 test("edit makes a change the working copy", () => {
-  expect(resolveOp({ op: "edit", rev: REV })).toEqual({
-    ok: true,
-    args: ["edit", `change_id(${REV})`],
-  })
+  expect(resolveOp({ op: "edit", rev: REV })).toEqual({ ok: true, args: ["edit", TARGET] })
 })
 
 test("edit needs a change to edit", () => {
   expect(resolveOp({ op: "edit" })).toMatchObject({ ok: false, status: 400 })
 })
 
-test("new and edit take only a change ID, so nothing reaches jj as a flag or a revset", () => {
-  for (const op of ["new", "edit"])
+test("describe sets a change's description, as one argument however it starts", () => {
+  expect(resolveOp({ op: "describe", rev: REV, description: "-x" })).toEqual({
+    ok: true,
+    args: ["describe", "-r", TARGET, "--message=-x"],
+  })
+})
+
+test("describe with an empty description clears it", () => {
+  expect(resolveOp({ op: "describe", rev: REV, description: "" })).toEqual({
+    ok: true,
+    args: ["describe", "-r", TARGET, "--message="],
+  })
+})
+
+test("describe needs a change and a description", () => {
+  for (const body of [{ rev: REV }, { rev: REV, description: 1 }, { description: "x" }])
+    expect(resolveOp({ op: "describe", ...body })).toMatchObject({ ok: false, status: 400 })
+})
+
+test("new, edit and describe take only a change ID, so nothing reaches jj as a flag or a revset", () => {
+  for (const op of ["new", "edit", "describe"])
     for (const rev of ["@", "main", "--help", "", "kx yz", "KXYZ", `${REV})|all(`, 1])
-      expect(resolveOp({ op, rev })).toMatchObject({ ok: false, status: 400 })
+      expect(resolveOp({ op, rev, description: "x" })).toMatchObject({
+        ok: false,
+        status: 400,
+      })
+})
+
+test("reading a description takes only a change ID too", async () => {
+  for (const rev of ["@", "main", "--help", "", `${REV})|all(`])
+    expect(await readDescription("/nonexistent", rev)).toMatchObject({
+      ok: false,
+      status: 400,
+    })
 })
 
 const hasJj = spawnSync("jj", ["--version"]).status === 0
@@ -129,5 +156,45 @@ describe.skipIf(!hasJj)("runOp in a real repo", () => {
     if (!edit.ok) throw new Error(edit.error)
     expect(await runOp(repo, edit.args)).toMatchObject({ ok: true })
     expect(changeId("@")).toBe(target)
+  })
+
+  const run = async (body: object) => {
+    const op = resolveOp(body)
+    if (!op.ok) throw new Error(op.error)
+    return await runOp(repo, op.args)
+  }
+
+  test("a description with a body, quotes and a leading dash lands as written, and reads back the same", async () => {
+    const rev = changeId("@")
+    const description = '-feat: the "dashboard" describes\n\nWith a body.\n\nAnd another.'
+    expect(await run({ op: "describe", rev, description })).toMatchObject({ ok: true })
+    expect(await readDescription(repo, rev)).toEqual({ ok: true, description })
+  })
+
+  test("a change with no description reads as empty, for an empty dialog", async () => {
+    jj("new")
+    expect(await readDescription(repo, changeId("@"))).toEqual({
+      ok: true,
+      description: "",
+    })
+  })
+
+  describe("a change that's gone since the log showed it", () => {
+    let gone: string
+    beforeAll(() => {
+      jj("new", "-m", "soon gone")
+      gone = changeId("@")
+      jj("abandon", "@")
+    })
+
+    test("can't be read, rather than reading as empty", async () => {
+      expect(await readDescription(repo, gone)).toMatchObject({ ok: false })
+    })
+
+    test("can't be described, rather than jj describing nothing and calling it done", async () => {
+      expect(await run({ op: "describe", rev: gone, description: "x" })).toMatchObject({
+        ok: false,
+      })
+    })
   })
 })
