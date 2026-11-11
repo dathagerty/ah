@@ -479,6 +479,7 @@ function showRevMenu(e: MouseEvent, rev: string) {
     ["New on top", () => void jjOp(tab, `jj new ${rev}`, { op: "new", rev })],
     ["Edit", () => void jjOp(tab, `jj edit ${rev}`, { op: "edit", rev })],
     ["Describe…", () => void openDescribe(tab, rev)],
+    ["Push", () => void jjOp(tab, `jj git push -c ${rev}`, { op: "push", rev })],
   ]
   openMenu.replaceChildren(
     el("div", { className: "open-menu-file" }, rev),
@@ -647,11 +648,17 @@ async function jjOp(
     return showToast(`${label}: ${e instanceof Error ? e.message : e}`, { error: true })
   }
   if (!res.ok) return showToast(await res.text(), { error: true })
-  // null when jj changed nothing, and recorded no operation to undo
-  const { operation }: { operation: string | null } = await res.json()
-  if (operation === null) return showToast(`${label}: nothing changed`)
-  // An undo is itself an operation, but undoing it is the terminal's job
-  if (body.op === "undo") return showToast(label)
+  // operation is null when jj changed nothing, and message says why
+  const {
+    operation,
+    remote,
+    message,
+  }: { operation: string | null; remote: boolean; message: string | null } =
+    await res.json()
+  if (operation === null) return showToast(`${label}: ${message ?? "nothing changed"}`)
+  // Undo can't take back what reached the remote. An undo is itself an
+  // operation, but undoing it is the terminal's job.
+  if (remote || body.op === "undo") return showToast(label)
   showToast(label, {
     undo: () => void jjOp(tab, `Undid: ${label}`, { op: "undo", operation }),
   })

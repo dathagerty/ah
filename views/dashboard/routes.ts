@@ -1045,7 +1045,13 @@ export class Dashboard {
     if (!op.ok) return new Response(op.error, { status: op.status })
     const result = await runOp(tab.root, op.args)
     if (!result.ok) return new Response(result.error, { status: 502 })
-    return Response.json({ operation: result.operation })
+    // `remote`: it reached the remote, which Undo can't take back.
+    // `message`: why nothing changed, when nothing did.
+    return Response.json({
+      operation: result.operation,
+      remote: op.remote ?? false,
+      message: result.operation === null ? result.message : null,
+    })
   }
 
   /** A change's description, to fill the describe dialog with (ops.ts) */

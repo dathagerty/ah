@@ -6,8 +6,9 @@ import { MAIN } from "./jj.ts"
 import { CHANGE_ID } from "./links.ts"
 
 // TODO(david): doc
+// TODO(david): doc `remote`
 export type OpResult =
-  | { ok: true; args: string[] }
+  | { ok: true; args: string[]; remote?: true }
   | { ok: false; status: 400; error: string }
 
 // TODO(david): doc
@@ -17,7 +18,8 @@ export type DescriptionResult =
 
 // TODO(david): doc
 export type RunResult =
-  | { ok: true; operation: string | null }
+  | { ok: true; operation: string }
+  | { ok: true; operation: null; message: string }
   | { ok: false; error: string }
 
 /** jj's operation IDs, full or short. Only these reach jj from the page, so
@@ -55,6 +57,13 @@ export function resolveOp(body: unknown): OpResult {
     // With `=`, a description starting with `-` isn't taken for a flag
     return { ok: true, args: ["describe", "-r", change, `--message=${description}`] }
   }
+  // Under a transient bookmark named for the change, made on the first push
+  // and moved by later ones. Undo would only rewind jj's view of the
+  // remote, not the remote.
+  if (op === "push")
+    return change
+      ? { ok: true, args: ["git", "push", "-c", change], remote: true }
+      : refuse("not a change ID")
   if (op === "fetch") return { ok: true, args: ["git", "fetch"] }
   if (op === "rebase")
     return { ok: true, args: ["rebase", "-s", `roots(${MAIN}..@)`, "-d", MAIN] }
@@ -123,8 +132,10 @@ export async function runOp(root: string, args: string[]): Promise<RunResult> {
         ok: false,
         error: `jj ran, but its operation can't be found to undo: ${after.error}`,
       }
-    // jj records no operation when nothing changed
-    return { ok: true, operation: after.id === before.id ? null : after.id }
+    // jj records no operation when nothing changed, and says why on stderr
+    if (after.id === before.id)
+      return { ok: true, operation: null, message: ran.stderr.trim() || "Nothing changed." }
+    return { ok: true, operation: after.id }
   } catch (e) {
     return { ok: false, error: message(e) }
   }

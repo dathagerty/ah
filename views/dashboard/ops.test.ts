@@ -72,8 +72,8 @@ test("describe needs a change and a description", () => {
     expect(resolveOp({ op: "describe", ...body })).toMatchObject({ ok: false, status: 400 })
 })
 
-test("new, edit and describe take only a change ID, so nothing reaches jj as a flag or a revset", () => {
-  for (const op of ["new", "edit", "describe"])
+test("every op on a change takes only a change ID, so nothing reaches jj as a flag or a revset", () => {
+  for (const op of ["new", "edit", "describe", "push"])
     for (const rev of ["@", "main", "--help", "", "kx yz", "KXYZ", `${REV})|all(`, 1])
       expect(resolveOp({ op, rev, description: "x" })).toMatchObject({
         ok: false,
@@ -97,6 +97,14 @@ test("rebase moves the workspace's stack, from its roots past main, onto main", 
   expect(resolveOp({ op: "rebase" })).toEqual({
     ok: true,
     args: ["rebase", "-s", `roots(${MAIN}..@)`, "-d", MAIN],
+  })
+})
+
+test("push pushes a change under its own generated bookmark, marked as reaching the remote, so there's no Undo", () => {
+  expect(resolveOp({ op: "push", rev: REV })).toEqual({
+    ok: true,
+    args: ["git", "push", "-c", TARGET],
+    remote: true,
   })
 })
 
@@ -141,7 +149,7 @@ describe.skipIf(!hasJj)("runOp in a real repo", () => {
   test("an operation that changes nothing gives nothing to undo, not the operation before it", async () => {
     // jj says "Nothing changed." and records no operation
     const result = await runOp(repo, ["describe", "-m", "from the dashboard"])
-    expect(result).toEqual({ ok: true, operation: null })
+    expect(result).toMatchObject({ ok: true, operation: null })
   })
 
   test("an operation that fails gives back jj's message, without color, for the toast", async () => {
@@ -274,10 +282,87 @@ describe.skipIf(!hasJj)("catching up with the remote", () => {
   })
 
   test("rebasing again, with the stack already on main, gives nothing to undo", async () => {
-    expect(await run({ op: "rebase" })).toEqual({ ok: true, operation: null })
+    expect(await run({ op: "rebase" })).toMatchObject({ ok: true, operation: null })
   })
 
   test("fetching with nothing new gives nothing to undo", async () => {
-    expect(await run({ op: "fetch" })).toEqual({ ok: true, operation: null })
+    expect(await run({ op: "fetch" })).toMatchObject({ ok: true, operation: null })
+  })
+})
+
+describe.skipIf(!hasJj)("pushing to the remote", () => {
+  let dir: string
+  let origin: string
+  let clone: string
+  const savedConfig = process.env.JJ_CONFIG
+
+  const jjIn = (...args: string[]) =>
+    execFileSync("jj", args, { cwd: clone, stdio: "pipe", encoding: "utf8" })
+  const commitOf = (rev: string) =>
+    jjIn("log", "-r", rev, "--no-graph", "-T", "commit_id").trim()
+  const changeOf = (rev: string) =>
+    jjIn("log", "-r", rev, "--no-graph", "-T", "change_id").trim()
+  // The remote's branches, as git sees them: name -> commit
+  const remoteBranches = () =>
+    new Map(
+      execFileSync(
+        "git",
+        ["--git-dir", origin, "for-each-ref", "--format=%(refname:short) %(objectname)"],
+        {
+          encoding: "utf8",
+        },
+      )
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => line.split(" ") as [string, string]),
+    )
+  const run = async (body: object) => {
+    const op = resolveOp(body)
+    if (!op.ok) throw new Error(op.error)
+    return await runOp(clone, op.args)
+  }
+
+  beforeAll(() => {
+    dir = mkdtempSync(join(tmpdir(), "ah-ops-push-"))
+    origin = join(dir, "origin.git")
+    clone = join(dir, "clone")
+    const config = join(dir, "config.toml")
+    writeFileSync(
+      config,
+      ["[user]", 'name = "Test"', 'email = "test@example.com"'].join("\n"),
+    )
+    process.env.JJ_CONFIG = config
+    execFileSync("git", ["init", "--bare", "--quiet", origin])
+    execFileSync("jj", ["git", "clone", origin, clone], { stdio: "pipe" })
+  })
+
+  afterAll(() => {
+    if (savedConfig === undefined) delete process.env.JJ_CONFIG
+    else process.env.JJ_CONFIG = savedConfig
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test("a pushed change is on the remote, under one generated bookmark", async () => {
+    writeFileSync(join(clone, "a.txt"), "a\n")
+    jjIn("describe", "-m", "work")
+    expect(await run({ op: "push", rev: changeOf("@") })).toMatchObject({ ok: true })
+    const branches = remoteBranches()
+    expect(branches.size).toBe(1)
+    expect([...branches.values()]).toEqual([commitOf("@")])
+  })
+
+  test("pushing it again after an amend moves the same bookmark, rather than making another", async () => {
+    writeFileSync(join(clone, "a.txt"), "a, amended\n")
+    expect(await run({ op: "push", rev: changeOf("@") })).toMatchObject({ ok: true })
+    const branches = remoteBranches()
+    expect(branches.size).toBe(1)
+    expect([...branches.values()]).toEqual([commitOf("@")])
+  })
+
+  test("pushing it again with nothing new says why nothing changed", async () => {
+    const result = await run({ op: "push", rev: changeOf("@") })
+    expect(result).toMatchObject({ ok: true, operation: null })
+    if (!result.ok || result.operation !== null) return
+    expect(result.message).toMatch(/already matches/)
   })
 })
