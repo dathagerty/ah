@@ -2,6 +2,7 @@
 // (resolveOp), and running it in the tab's workspace (runOp).
 
 import { run } from "../../platform/proc.ts"
+import { CHANGE_ID } from "./links.ts"
 
 // TODO(david): doc
 export type OpResult =
@@ -20,7 +21,24 @@ const refuse = (error: string): OpResult => ({ ok: false, status: 400, error })
 // TODO(david): doc
 export function resolveOp(body: unknown): OpResult {
   if (typeof body !== "object" || body === null) return refuse("not an operation")
-  const { op, operation } = body as { op?: unknown; operation?: unknown }
+  const { op, operation, rev } = body as {
+    op?: unknown
+    operation?: unknown
+    rev?: unknown
+  }
+  // As a revset that's only a change ID: a bare symbol would be a bookmark
+  // of that name first
+  const change = () =>
+    typeof rev === "string" && CHANGE_ID.test(rev) ? `change_id(${rev})` : null
+  if (op === "new") {
+    if (rev === undefined) return { ok: true, args: ["new"] }
+    const target = change()
+    return target ? { ok: true, args: ["new", target] } : refuse("not a change ID")
+  }
+  if (op === "edit") {
+    const target = change()
+    return target ? { ok: true, args: ["edit", target] } : refuse("not a change ID")
+  }
   if (op === "undo") {
     if (typeof operation !== "string" || !OPERATION_ID.test(operation))
       return refuse("not an operation ID")

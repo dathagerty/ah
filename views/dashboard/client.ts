@@ -26,6 +26,7 @@ import { jiraBadge, JiraView } from "./jira_view.ts"
 const byId = (id: string) => document.getElementById(id)!
 const strip = byId("strip")
 const logPane = byId("log-pane")
+const logActions = byId("log-actions")
 const docPane = byId("doc-pane")
 const docName = byId("doc-name")
 const trackerStrip = byId("trackers")
@@ -369,6 +370,7 @@ function renderLogTabs() {
   for (const t of document.querySelectorAll<HTMLElement>(".log-tab"))
     t.classList.toggle("current", t.dataset.tab === logTab)
   logPane.hidden = logTab !== "jj"
+  logActions.hidden = logTab !== "jj"
   testsPane.hidden = logTab !== "tests"
   prsPane.hidden = logTab !== "prs"
   issuesPane.hidden = logTab !== "issues"
@@ -468,11 +470,46 @@ document.addEventListener("keydown", (e) => {
 document.addEventListener("scroll", closeOpenMenu, true)
 window.addEventListener("blur", closeOpenMenu)
 
+// Right-click on a change ID: the jj operations on it, in the same menu. A
+// plain click is still skepsis.
+function showRevMenu(e: MouseEvent, rev: string) {
+  const tab = state.focused
+  if (!tab) return
+  const choices: [string, string, { op: string; rev: string }][] = [
+    ["New on top", `jj new ${rev}`, { op: "new", rev }],
+    ["Edit", `jj edit ${rev}`, { op: "edit", rev }],
+  ]
+  openMenu.replaceChildren(
+    el("div", { className: "open-menu-file" }, rev),
+    ...choices.map(([label, ran, body]) =>
+      el(
+        "button",
+        {
+          onclick: () => {
+            openMenu.hidePopover()
+            void jjOp(tab, ran, body)
+          },
+        },
+        label,
+      ),
+    ),
+  )
+  openMenu.style.left = `${Math.min(e.clientX, document.documentElement.clientWidth - 220)}px`
+  openMenu.style.top = `${e.clientY}px`
+  openMenu.showPopover()
+}
+
 logPane.addEventListener("contextmenu", (e) => {
-  const a = (e.target as Element).closest<HTMLElement>("a[data-file]")
-  if (!a?.dataset.file) return
+  const a = (e.target as Element).closest<HTMLElement>("a[data-file], a[data-rev]")
+  const { file, rev } = a?.dataset ?? {}
+  if (!file && !rev) return
   e.preventDefault()
-  showOpenMenu(e, a.dataset.file)
+  if (file) showOpenMenu(e, file)
+  else if (rev) showRevMenu(e, rev)
+})
+
+byId("op-new").addEventListener("click", () => {
+  if (state.focused) void jjOp(state.focused, "jj new", { op: "new" })
 })
 
 logPane.addEventListener("click", (e) => {

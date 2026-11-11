@@ -26,7 +26,7 @@ const DOC = /\.(md|markdown|html?)$/i
 
 /** jj's change IDs are k–z only. A rev goes to jj, so nothing else does:
  * no revsets, no commit IDs. */
-const CHANGE_ID = /^[k-z]+$/
+export const CHANGE_ID = /^[k-z]+$/
 
 const refuse = (status: 400 | 404, error: string): LinkResult => ({
   ok: false,

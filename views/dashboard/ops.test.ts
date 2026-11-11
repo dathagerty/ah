@@ -31,6 +31,36 @@ test("a body that isn't an object is refused", () => {
     expect(resolveOp(body)).toMatchObject({ ok: false, status: 400 })
 })
 
+const REV = "kxyzqrst"
+
+test("new on a change starts one on top of it, named as a change ID so a bookmark can't stand in", () => {
+  expect(resolveOp({ op: "new", rev: REV })).toEqual({
+    ok: true,
+    args: ["new", `change_id(${REV})`],
+  })
+})
+
+test("new with no change starts one on top of the working copy, for the button", () => {
+  expect(resolveOp({ op: "new" })).toEqual({ ok: true, args: ["new"] })
+})
+
+test("edit makes a change the working copy", () => {
+  expect(resolveOp({ op: "edit", rev: REV })).toEqual({
+    ok: true,
+    args: ["edit", `change_id(${REV})`],
+  })
+})
+
+test("edit needs a change to edit", () => {
+  expect(resolveOp({ op: "edit" })).toMatchObject({ ok: false, status: 400 })
+})
+
+test("new and edit take only a change ID, so nothing reaches jj as a flag or a revset", () => {
+  for (const op of ["new", "edit"])
+    for (const rev of ["@", "main", "--help", "", "kx yz", "KXYZ", `${REV})|all(`, 1])
+      expect(resolveOp({ op, rev })).toMatchObject({ ok: false, status: 400 })
+})
+
 const hasJj = spawnSync("jj", ["--version"]).status === 0
 
 describe.skipIf(!hasJj)("runOp in a real repo", () => {
@@ -43,6 +73,8 @@ describe.skipIf(!hasJj)("runOp in a real repo", () => {
   const latestOp = () => jj("op", "log", "-n", "1", "--no-graph", "-T", "id").trim()
   const description = (rev: string) =>
     jj("log", "-r", rev, "--no-graph", "-T", "description").trim()
+  const changeId = (rev: string) =>
+    jj("log", "-r", rev, "--no-graph", "-T", "change_id").trim()
 
   beforeAll(() => {
     dir = mkdtempSync(join(tmpdir(), "ah-ops-"))
@@ -87,5 +119,15 @@ describe.skipIf(!hasJj)("runOp in a real repo", () => {
 
     expect(description("@-")).toBe("from the dashboard")
     expect(description("@")).toBe("later")
+  })
+
+  test("edit goes to the change even when a bookmark has its ID for a name", async () => {
+    const target = changeId("@-")
+    // jj resolves a bare symbol as a bookmark before a change ID
+    jj("bookmark", "create", target, "-r", "@")
+    const edit = resolveOp({ op: "edit", rev: target })
+    if (!edit.ok) throw new Error(edit.error)
+    expect(await runOp(repo, edit.args)).toMatchObject({ ok: true })
+    expect(changeId("@")).toBe(target)
   })
 })

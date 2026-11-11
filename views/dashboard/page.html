@@ -110,6 +110,31 @@
         color: var(--accent);
         background: var(--accent-bg);
       }
+      /* Whole-repo jj operations, over the jj tab only (client.ts) */
+      #log-actions {
+        margin-left: auto;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 0 8px;
+      }
+      #log-actions[hidden] {
+        display: none;
+      }
+      #log-actions button {
+        padding: 1px 9px;
+        font: inherit;
+        font-size: 0.85em;
+        border-radius: 5px;
+        border: 1px solid var(--border);
+        background: none;
+        color: var(--muted);
+        cursor: pointer;
+      }
+      #log-actions button:hover {
+        color: var(--accent);
+        border-color: var(--accent);
+      }
       #tests-pane {
         flex: 1 1 0;
         min-height: 0;
@@ -724,6 +749,11 @@
           <span class="log-tab" data-tab="issues"
             >Issues <span id="issues-badge"></span
           ></span>
+          <span id="log-actions">
+            <button id="op-new" title="jj new: a new change on top of the working copy">
+              New
+            </button>
+          </span>
         </nav>
         <div id="log-pane">
           <p class="empty">Waiting for Rex…</p>
