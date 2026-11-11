@@ -500,6 +500,51 @@ async function openLink(body: {
   openSplit(body.tab, body.file, editor, doc, body.line)
 }
 
+// A jj operation for a tab (ops.ts, through routes.ts). The log refreshes on
+// its own once it lands; the toast says how it went: Undo after one that
+// worked, for a few seconds, or jj's message after one that didn't, until
+// it's closed.
+const opToast = byId("op-toast")
+const TOAST_MS = 8000
+let toastTimer: ReturnType<typeof setTimeout> | undefined
+
+function showToast(
+  text: string,
+  { error = false, undo }: { error?: boolean; undo?: () => void } = {},
+) {
+  clearTimeout(toastTimer)
+  const close = () => (opToast.hidden = true)
+  const buttons = [
+    ...(undo ? [el("button", { onclick: () => (close(), undo()) }, "Undo")] : []),
+    el("button", { title: "Close", onclick: close }, "✕"),
+  ]
+  opToast.replaceChildren(el("div", { className: "op-toast-text" }, text), ...buttons)
+  opToast.classList.toggle("error", error)
+  opToast.hidden = false
+  if (!error) toastTimer = setTimeout(close, TOAST_MS)
+}
+
+/** `label` says what ran, as the toast shows it; `body` is ops.ts's */
+async function jjOp(
+  tab: string,
+  label: string,
+  body: { op: string; [key: string]: unknown },
+) {
+  let res: Response
+  try {
+    res = await fetch("jj-op", { method: "POST", body: JSON.stringify({ tab, ...body }) })
+  } catch (e) {
+    return showToast(`${label}: ${e instanceof Error ? e.message : e}`, { error: true })
+  }
+  if (!res.ok) return showToast(await res.text(), { error: true })
+  const { operation }: { operation: string } = await res.json()
+  // An undo is itself an operation, but undoing it is the terminal's job
+  if (body.op === "undo") return showToast(label)
+  showToast(label, {
+    undo: () => void jjOp(tab, `Undid: ${label}`, { op: "undo", operation }),
+  })
+}
+
 // tab -> nvim on a file in the split under the log, on the doc editor's pane
 // socket (routes.ts), hidden unless its tab is focused. The file's doc socket
 // is open alongside only so the server keeps the file, and nvim with it. A
